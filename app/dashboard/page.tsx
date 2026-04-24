@@ -567,16 +567,16 @@ export default function PinkZone() {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 text-black">
       {/* 헤더 */}
       <header className="bg-white shadow-sm border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center gap-6">
+        <div className="max-w-7xl mx-auto px-5 py-2 flex items-center gap-4 flex-nowrap">
           <div className="flex items-center gap-3 shrink-0">
-            <div className="w-11 h-11 bg-gradient-to-br from-pink-500 to-purple-600 rounded-2xl flex items-center justify-center text-3xl">💖</div>
+            <div className="w-9 h-9 bg-gradient-to-br from-pink-500 to-purple-600 rounded-xl flex items-center justify-center text-2xl">💖</div>
             <div>
-              <h1 className="text-3xl font-bold">핑크 존</h1>
-              <p className="text-xs text-gray-600 -mt-1">작가작성 템플릿</p>
+              <h1 className="text-2xl font-bold leading-tight">핑크 존</h1>
+              <p className="text-[11px] text-gray-600 -mt-1">작가작성 템플릿</p>
             </div>
           </div>
 
-          <div className="flex gap-3 flex-wrap flex-1">
+          <div className="flex gap-2 flex-nowrap flex-1 items-center overflow-x-auto">
             {[
               { id: '후기생성준비기', label: '후기생성준비기' },
               { id: '언니정보 검색/저장', label: '언니정보 검색/저장' },
@@ -586,7 +586,7 @@ export default function PinkZone() {
               <button
                 key={m.id}
                 onClick={() => changeMenu(m.id)}
-                className={`px-7 py-3 rounded-2xl font-medium transition-all ${
+                className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
                   activeMenu === m.id ? 'bg-orange-500 text-white shadow-md' : 'bg-white border hover:bg-orange-50'
                 }`}
               >
@@ -595,15 +595,15 @@ export default function PinkZone() {
             ))}
           </div>
 
-          <div className="ml-auto flex items-center gap-3 shrink-0">
-            <div className="text-right hidden xl:block">
-              <p className="text-xs text-gray-500">로그인 계정</p>
-              <p className="text-sm font-semibold text-gray-800">{userEmail}</p>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <div className="text-right hidden lg:block">
+              <p className="text-[11px] text-gray-500 leading-tight">로그인 계정</p>
+              <p className="text-xs font-semibold text-gray-800 leading-tight">{userEmail}</p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
-              className="px-5 py-3 rounded-2xl bg-black text-white font-bold hover:bg-gray-800"
+              className="px-4 py-2 rounded-xl bg-black text-white text-sm font-bold whitespace-nowrap hover:bg-gray-800"
             >
               로그아웃
             </button>
