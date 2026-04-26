@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 type Sister = {
   id: string;
   name: string;
+  category: string;
   spec: string;
   memo?: string;
 };
@@ -28,6 +29,9 @@ type ExtraOrder = {
   date: string;
 };
 
+const SISTER_CATEGORIES = ['안마', '건마', '오피', '술집', '휴게텔', '기타'];
+const SISTER_CATEGORY_FILTERS = ['전체', ...SISTER_CATEGORIES];
+
 export default function PinkZone() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -43,14 +47,16 @@ export default function PinkZone() {
   // 언니정보 모달
   const [showSisterModal, setShowSisterModal] = useState(false);
   const [editingSister, setEditingSister] = useState<Sister | null>(null);
-  const [sisterForm, setSisterForm] = useState({ name: '', spec: '', memo: '' });
+  const [sisterForm, setSisterForm] = useState({ name: '', category: '안마', spec: '', memo: '' });
   const [sisterSearch, setSisterSearch] = useState('');
+  const [sisterCategoryFilter, setSisterCategoryFilter] = useState('전체');
 
   // 후기 모달
   const [selectedSisterId, setSelectedSisterId] = useState('');
   const [reviewForm, setReviewForm] = useState({ title: '', content: '' });
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewSearch, setReviewSearch] = useState('');
+  const [reviewSisterCategoryFilter, setReviewSisterCategoryFilter] = useState('전체');
   const [selectedReviewIds, setSelectedReviewIds] = useState<string[]>([]);
   const [reviewPage, setReviewPage] = useState(1);
   const [viewingReview, setViewingReview] = useState<Review | null>(null);
@@ -63,8 +69,11 @@ export default function PinkZone() {
   // 후기생성준비기
   const [targetSisterName, setTargetSisterName] = useState('');
   const [prepSisterSearch, setPrepSisterSearch] = useState('');
+  const [prepSisterCategoryFilter, setPrepSisterCategoryFilter] = useState('전체');
   const [prepExtraSearch, setPrepExtraSearch] = useState('');
   const [prepReviewSearch, setPrepReviewSearch] = useState('');
+  const [prepReviewCategoryFilter, setPrepReviewCategoryFilter] = useState('전체');
+  const [isPrepReviewPickerOpen, setIsPrepReviewPickerOpen] = useState(true);
   const [prepSelectedSisterId, setPrepSelectedSisterId] = useState('');
   const [prepSelectedExtraOrderIds, setPrepSelectedExtraOrderIds] = useState<string[]>([]);
   const [prepSelectedReviewIds, setPrepSelectedReviewIds] = useState<string[]>([]);
@@ -103,7 +112,7 @@ export default function PinkZone() {
     const [sistersResult, reviewsResult, extraOrdersResult] = await Promise.all([
       supabase
         .from('sisters')
-        .select('id, name, spec, memo, created_at')
+        .select('id, name, category, spec, memo, created_at')
         .eq('user_id', currentUserId)
         .order('created_at', { ascending: false }),
       supabase
@@ -133,6 +142,7 @@ export default function PinkZone() {
     setSisters((sistersResult.data || []).map((row) => ({
       id: row.id,
       name: row.name,
+      category: row.category || '기타',
       spec: row.spec,
       memo: row.memo || '',
     })));
@@ -190,20 +200,34 @@ export default function PinkZone() {
   };
 
   // ==================== 공통 필터 ====================
+  const getSisterCategoryByIdOrName = (sisterId: string, sisterName: string) => {
+    const matchedSister = sisters.find(s => s.id === sisterId || s.name === sisterName);
+    return matchedSister?.category || '기타';
+  };
+
+  const selectedPrepSister = sisters.find(s => s.id === prepSelectedSisterId);
+  const selectedPrepReviews = reviews.filter(r => prepSelectedReviewIds.includes(r.id));
+
   const filteredSisters = sisters
+    .filter(s => sisterCategoryFilter === '전체' || s.category === sisterCategoryFilter)
     .filter(s =>
       s.name.toLowerCase().includes(sisterSearch.toLowerCase()) ||
+      s.category.toLowerCase().includes(sisterSearch.toLowerCase()) ||
       s.spec.toLowerCase().includes(sisterSearch.toLowerCase()) ||
       (s.memo || '').toLowerCase().includes(sisterSearch.toLowerCase())
     );
 
   const filteredReviews = reviews
+    .filter(r => reviewSisterCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === reviewSisterCategoryFilter)
     .filter(r =>
       r.sisterName.toLowerCase().includes(reviewSearch.toLowerCase()) ||
+      getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase().includes(reviewSearch.toLowerCase()) ||
       r.title.toLowerCase().includes(reviewSearch.toLowerCase()) ||
       r.content.toLowerCase().includes(reviewSearch.toLowerCase())
     )
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const reviewFormSisters = sisters.filter(s => reviewSisterCategoryFilter === '전체' || s.category === reviewSisterCategoryFilter);
 
   const reviewsPerPage = 10;
   const reviewTotalPages = Math.max(1, Math.ceil(filteredReviews.length / reviewsPerPage));
@@ -229,10 +253,10 @@ export default function PinkZone() {
   const openSisterModal = (sister?: Sister) => {
     if (sister) {
       setEditingSister(sister);
-      setSisterForm({ name: sister.name, spec: sister.spec, memo: sister.memo || '' });
+      setSisterForm({ name: sister.name, category: sister.category || '기타', spec: sister.spec, memo: sister.memo || '' });
     } else {
       setEditingSister(null);
-      setSisterForm({ name: '', spec: '', memo: '' });
+      setSisterForm({ name: '', category: '안마', spec: '', memo: '' });
     }
     setShowSisterModal(true);
   };
@@ -248,13 +272,14 @@ export default function PinkZone() {
         .from('sisters')
         .update({
           name: sisterForm.name,
+          category: sisterForm.category,
           spec: sisterForm.spec,
           memo: sisterForm.memo,
           updated_at: new Date().toISOString(),
         })
         .eq('id', editingSister.id)
         .eq('user_id', currentUserId)
-        .select('id, name, spec, memo')
+        .select('id, name, category, spec, memo')
         .single();
 
       if (error) {
@@ -266,6 +291,7 @@ export default function PinkZone() {
       setSisters(sisters.map(s => s.id === editingSister.id ? {
         id: data.id,
         name: data.name,
+        category: data.category || '기타',
         spec: data.spec,
         memo: data.memo || '',
       } : s));
@@ -275,10 +301,11 @@ export default function PinkZone() {
         .insert({
           user_id: currentUserId,
           name: sisterForm.name,
+          category: sisterForm.category,
           spec: sisterForm.spec,
           memo: sisterForm.memo,
         })
-        .select('id, name, spec, memo')
+        .select('id, name, category, spec, memo')
         .single();
 
       if (error) {
@@ -290,6 +317,7 @@ export default function PinkZone() {
       setSisters([{
         id: data.id,
         name: data.name,
+        category: data.category || '기타',
         spec: data.spec,
         memo: data.memo || '',
       }, ...sisters]);
@@ -705,11 +733,14 @@ export default function PinkZone() {
   };
 
   // ==================== 후기생성준비기 ====================
-  const prepFilteredSisters = sisters.filter(s =>
-    s.name.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
-    s.spec.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
-    (s.memo || '').toLowerCase().includes(prepSisterSearch.toLowerCase())
-  );
+  const prepFilteredSisters = sisters
+    .filter(s => prepSisterCategoryFilter === '전체' || s.category === prepSisterCategoryFilter)
+    .filter(s =>
+      s.name.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
+      s.category.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
+      s.spec.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
+      (s.memo || '').toLowerCase().includes(prepSisterSearch.toLowerCase())
+    );
 
   const prepFilteredExtraOrders = extraOrders.filter(o =>
     o.title.toLowerCase().includes(prepExtraSearch.toLowerCase()) ||
@@ -717,11 +748,14 @@ export default function PinkZone() {
     (o.memo || '').toLowerCase().includes(prepExtraSearch.toLowerCase())
   );
 
-  const prepFilteredReviews = reviews.filter(r =>
-    r.sisterName.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-    r.title.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-    r.content.toLowerCase().includes(prepReviewSearch.toLowerCase())
-  );
+  const prepFilteredReviews = reviews
+    .filter(r => prepReviewCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === prepReviewCategoryFilter)
+    .filter(r =>
+      r.sisterName.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      r.title.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      r.content.toLowerCase().includes(prepReviewSearch.toLowerCase())
+    );
 
   const togglePrepExtraOrder = (id: string) => {
     if (prepSelectedExtraOrderIds.includes(id)) {
@@ -733,7 +767,9 @@ export default function PinkZone() {
 
   const togglePrepReview = (id: string) => {
     if (prepSelectedReviewIds.includes(id)) {
-      setPrepSelectedReviewIds(prepSelectedReviewIds.filter(reviewId => reviewId !== id));
+      const nextIds = prepSelectedReviewIds.filter(reviewId => reviewId !== id);
+      setPrepSelectedReviewIds(nextIds);
+      if (nextIds.length === 0) setIsPrepReviewPickerOpen(true);
       return;
     }
 
@@ -742,7 +778,27 @@ export default function PinkZone() {
       return;
     }
 
-    setPrepSelectedReviewIds([...prepSelectedReviewIds, id]);
+    const nextIds = [...prepSelectedReviewIds, id];
+    setPrepSelectedReviewIds(nextIds);
+  };
+
+  const completePrepReviewSelection = () => {
+    if (prepSelectedReviewIds.length === 0) {
+      alert('불러올 후기를 1개 이상 선택해주세요.');
+      return;
+    }
+
+    setIsPrepReviewPickerOpen(false);
+  };
+
+  const resetPrepSisterSelection = () => {
+    setPrepSelectedSisterId('');
+    setTargetSisterName('');
+  };
+
+  const resetPrepReviewSelection = () => {
+    setPrepSelectedReviewIds([]);
+    setIsPrepReviewPickerOpen(true);
   };
 
   const buildMergedPrompt = () => {
@@ -762,7 +818,7 @@ export default function PinkZone() {
       '',
       '[1번 테이블] 불러온 언니 정보',
       selectedSister
-        ? `이름: ${selectedSister.name}\n스펙/특징:\n${selectedSister.spec}\n${selectedSister.memo ? `\n메모:\n${selectedSister.memo}` : ''}`
+        ? `이름: ${selectedSister.name}\n카테고리: ${selectedSister.category}\n스펙/특징:\n${selectedSister.spec}\n${selectedSister.memo ? `\n메모:\n${selectedSister.memo}` : ''}`
         : '선택된 언니정보 없음',
       '',
       '[2번 테이블] 불러온 추가 오더',
@@ -828,14 +884,16 @@ export default function PinkZone() {
     // 언니정보 작성/수정 중이던 임시값
     setShowSisterModal(false);
     setEditingSister(null);
-    setSisterForm({ name: '', spec: '', memo: '' });
+    setSisterForm({ name: '', category: '안마', spec: '', memo: '' });
     setSisterSearch('');
+    setSisterCategoryFilter('전체');
 
     // 언니후기 작성/수정 중이던 임시값
     setSelectedSisterId('');
     setReviewForm({ title: '', content: '' });
     setEditingReview(null);
     setReviewSearch('');
+    setReviewSisterCategoryFilter('전체');
     setSelectedReviewIds([]);
     setReviewPage(1);
     setViewingReview(null);
@@ -848,8 +906,11 @@ export default function PinkZone() {
     // 후기생성준비기 0번~5번 임시값
     setTargetSisterName('');
     setPrepSisterSearch('');
+    setPrepSisterCategoryFilter('전체');
     setPrepExtraSearch('');
     setPrepReviewSearch('');
+    setPrepReviewCategoryFilter('전체');
+    setIsPrepReviewPickerOpen(true);
     setPrepSelectedSisterId('');
     setPrepSelectedExtraOrderIds([]);
     setPrepSelectedReviewIds([]);
@@ -972,12 +1033,52 @@ export default function PinkZone() {
                 />
               </div>
 
+              <div className="bg-pink-50 rounded-2xl p-5 mb-5">
+                <div className="flex flex-wrap justify-center gap-4">
+                  {SISTER_CATEGORY_FILTERS.map(category => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setPrepSisterCategoryFilter(category)}
+                      className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
+                        prepSisterCategoryFilter === category
+                          ? 'bg-pink-600 text-white border-pink-600 shadow'
+                          : 'bg-white hover:bg-pink-100'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-center text-sm text-gray-500 mt-3">
+                  카테고리 선택 혹은 전체보기로 저장된 언니를 불러옵니다.
+                </p>
+              </div>
+
+              {selectedPrepSister && (
+                <div className="mb-5 rounded-2xl border border-pink-200 bg-white px-6 py-5 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-lg font-bold text-pink-700">{selectedPrepSister.name} 선택됨</p>
+                    <p className="text-sm text-gray-600 mt-1">카테고리: {selectedPrepSister.category}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resetPrepSisterSelection}
+                    className="px-5 py-3 rounded-xl border bg-white hover:bg-pink-50 font-semibold"
+                  >
+                    다시 선택하기
+                  </button>
+                </div>
+              )}
+
+              {!selectedPrepSister && (
               <div className="max-h-[420px] overflow-y-auto border rounded-2xl">
                 <table className="w-full text-left">
                   <thead className="bg-pink-50 sticky top-0 z-10">
                     <tr>
                       <th className="px-4 py-3 w-20">선택</th>
                       <th className="px-4 py-3 w-40">이름</th>
+                      <th className="px-4 py-3 w-24">카테고리</th>
                       <th className="px-4 py-3">스펙/특징</th>
                       <th className="px-4 py-3 w-56">메모</th>
                     </tr>
@@ -985,7 +1086,7 @@ export default function PinkZone() {
                   <tbody>
                     {prepFilteredSisters.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="p-6 text-center text-gray-500">저장된 언니정보가 없습니다.</td>
+                        <td colSpan={5} className="p-6 text-center text-gray-500">저장된 언니정보가 없습니다.</td>
                       </tr>
                     )}
 
@@ -1006,6 +1107,7 @@ export default function PinkZone() {
                           />
                         </td>
                         <td className="px-4 py-3 font-bold">{s.name}</td>
+                        <td className="px-4 py-3"><span className="inline-flex px-3 py-1 rounded-full bg-pink-100 text-pink-700 text-xs font-bold">{s.category}</span></td>
                         <td className="px-4 py-3">
                           <div
                             className="text-sm leading-6"
@@ -1038,7 +1140,8 @@ export default function PinkZone() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              )}
             </section>
 
             {/* 2번 테이블 */}
@@ -1110,15 +1213,76 @@ export default function PinkZone() {
                 />
               </div>
 
-              <p className="mb-4 text-sm text-gray-600">현재 선택된 후기: {prepSelectedReviewIds.length}/2개</p>
+              <div className="bg-blue-50 rounded-2xl p-5 mb-5">
+                <div className="flex flex-wrap justify-center gap-4">
+                  {SISTER_CATEGORY_FILTERS.map(category => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => {
+                        setPrepReviewCategoryFilter(category);
+                        setIsPrepReviewPickerOpen(true);
+                      }}
+                      className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
+                        prepReviewCategoryFilter === category
+                          ? 'bg-blue-600 text-white border-blue-600 shadow'
+                          : 'bg-white hover:bg-blue-100'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-center text-sm text-gray-500 mt-3">
+                  언니정보 카테고리를 기준으로 저장된 후기를 불러옵니다.
+                </p>
+              </div>
 
-              <div className="max-h-[360px] overflow-y-auto border rounded-2xl">
+              {prepSelectedReviewIds.length > 0 && (
+                <div className="mb-5 rounded-2xl border border-blue-200 bg-white px-6 py-5">
+                  <div className="flex items-center justify-between gap-4 mb-3">
+                    <div>
+                      <p className="text-lg font-bold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
+                      <p className="text-sm text-gray-600 mt-1">선택 목록을 확인한 뒤 필요하면 다시 선택할 수 있습니다.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={resetPrepReviewSelection}
+                      className="px-5 py-3 rounded-xl border bg-white hover:bg-blue-50 font-semibold"
+                    >
+                      다시 선택하기
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {selectedPrepReviews.map(r => (
+                      <div key={r.id} className="rounded-xl bg-blue-50 px-4 py-3 text-sm">
+                        <strong>{r.sisterName}</strong> · {r.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isPrepReviewPickerOpen && (
+              <div>
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <p className="text-sm font-semibold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
+                  <button
+                    type="button"
+                    onClick={completePrepReviewSelection}
+                    className="px-5 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700"
+                  >
+                    선택 완료
+                  </button>
+                </div>
+                <div className="max-h-[360px] overflow-y-auto border rounded-2xl">
                 <table className="w-full text-left">
                   <thead className="bg-blue-50 sticky top-0 z-10">
                     <tr>
                       <th className="p-3 w-16">선택</th>
                       <th className="p-3 w-28">날짜</th>
                       <th className="p-3 w-28">언니</th>
+                      <th className="p-3 w-24">카테고리</th>
                       <th className="p-3 w-52">제목</th>
                       <th className="p-3">내용 미리보기</th>
                       <th className="p-3 w-24 text-center">보기</th>
@@ -1127,7 +1291,7 @@ export default function PinkZone() {
                   <tbody>
                     {prepFilteredReviews.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="p-6 text-center text-gray-500">저장된 후기가 없습니다.</td>
+                        <td colSpan={7} className="p-6 text-center text-gray-500">저장된 후기가 없습니다.</td>
                       </tr>
                     )}
 
@@ -1143,6 +1307,7 @@ export default function PinkZone() {
                         </td>
                         <td className="p-3 text-xs text-gray-500">{r.date}</td>
                         <td className="p-3 font-bold">{r.sisterName}</td>
+                        <td className="p-3"><span className="inline-flex px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{getSisterCategoryByIdOrName(r.sisterId, r.sisterName)}</span></td>
                         <td className="p-3 text-sm font-semibold">
                           <div
                             style={{
@@ -1182,7 +1347,9 @@ export default function PinkZone() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
+              )}
             </section>
 
             {/* 4번 테이블 */}
@@ -1248,11 +1415,33 @@ export default function PinkZone() {
               </div>
             </div>
 
+            <div className="bg-pink-50 rounded-2xl p-5 mb-6">
+              <div className="flex flex-wrap justify-center gap-4">
+                {SISTER_CATEGORY_FILTERS.map(category => (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setSisterCategoryFilter(category)}
+                    className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
+                      sisterCategoryFilter === category
+                        ? 'bg-pink-600 text-white border-pink-600 shadow'
+                        : 'bg-white hover:bg-pink-100'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {filteredSisters.map(s => (
                 <div key={s.id} className="border rounded-2xl p-6">
                   <div className="flex justify-between gap-3">
-                    <h3 className="font-bold text-2xl">{s.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-2xl">{s.name}</h3>
+                      <span className="inline-flex px-3 py-1 rounded-full bg-pink-100 text-pink-700 text-xs font-bold">{s.category}</span>
+                    </div>
                     <div className="flex gap-3 shrink-0">
                       <button onClick={() => openSisterModal(s)} className="text-pink-600 hover:underline">수정</button>
                       <button onClick={() => deleteSister(s.id)} className="text-red-600 hover:underline">삭제</button>
@@ -1280,9 +1469,34 @@ export default function PinkZone() {
             {/* 작성 폼 */}
             <div className="bg-gray-50 border rounded-2xl p-8 mb-10">
               <h3 className="font-semibold text-xl mb-6">{editingReview ? '후기 수정' : '✍️ 새 후기 작성'}</h3>
+
+              <div className="bg-pink-50 rounded-2xl p-4 mb-4">
+                <p className="font-semibold mb-3">언니 카테고리 선택</p>
+                <div className="flex flex-wrap gap-3">
+                  {SISTER_CATEGORY_FILTERS.map(category => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => {
+                        setReviewSisterCategoryFilter(category);
+                        setSelectedSisterId('');
+                        setReviewPage(1);
+                      }}
+                      className={`px-5 py-2 rounded-xl border font-bold transition-all ${
+                        reviewSisterCategoryFilter === category
+                          ? 'bg-pink-600 text-white border-pink-600 shadow'
+                          : 'bg-white hover:bg-pink-100'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <select value={selectedSisterId} onChange={e => setSelectedSisterId(e.target.value)} className="w-full border rounded-2xl px-4 py-3 mb-4">
                 <option value="">언니 선택</option>
-                {sisters.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {reviewFormSisters.map(s => <option key={s.id} value={s.id}>{s.name} ({s.category})</option>)}
               </select>
               <input type="text" placeholder="후기 제목" value={reviewForm.title} onChange={e => setReviewForm({...reviewForm, title: e.target.value})} className="w-full border rounded-2xl px-4 py-3 mb-4" />
 
@@ -1334,6 +1548,30 @@ export default function PinkZone() {
 
             {/* 목록 */}
             <div>
+              <div className="bg-pink-50 rounded-2xl p-4 mb-5">
+                <p className="font-semibold mb-3">저장된 후기 카테고리 필터</p>
+                <div className="flex flex-wrap gap-3">
+                  {SISTER_CATEGORY_FILTERS.map(category => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => {
+                        setReviewSisterCategoryFilter(category);
+                        setReviewPage(1);
+                        setSelectedReviewIds([]);
+                      }}
+                      className={`px-5 py-2 rounded-xl border font-bold transition-all ${
+                        reviewSisterCategoryFilter === category
+                          ? 'bg-pink-600 text-white border-pink-600 shadow'
+                          : 'bg-white hover:bg-pink-100'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex justify-between items-center gap-4 mb-6">
                 <div>
                   <h3 className="font-semibold text-xl">저장된 후기 ({filteredReviews.length}개)</h3>
@@ -1586,6 +1824,11 @@ export default function PinkZone() {
           <div className="bg-white rounded-3xl p-8 w-full max-w-lg text-black">
             <h2 className="text-2xl font-bold mb-6">{editingSister ? '언니 수정' : '새 언니 등록'}</h2>
             <input type="text" placeholder="닉네임" value={sisterForm.name} onChange={e => setSisterForm({...sisterForm, name: e.target.value})} className="w-full border rounded-2xl px-4 py-3 mb-4" />
+            <select value={sisterForm.category} onChange={e => setSisterForm({...sisterForm, category: e.target.value})} className="w-full border rounded-2xl px-4 py-3 mb-4">
+              {SISTER_CATEGORIES.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
             <textarea placeholder="스펙 및 특징" value={sisterForm.spec} onChange={e => setSisterForm({...sisterForm, spec: e.target.value})} className="w-full border rounded-2xl px-4 py-3 mb-4 h-40" />
             <textarea placeholder="추가 메모" value={sisterForm.memo} onChange={e => setSisterForm({...sisterForm, memo: e.target.value})} className="w-full border rounded-2xl px-4 py-3 h-28" />
             <div className="flex gap-3 mt-8">
