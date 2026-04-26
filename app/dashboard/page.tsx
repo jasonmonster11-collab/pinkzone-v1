@@ -51,6 +51,9 @@ export default function PinkZone() {
   const [reviewForm, setReviewForm] = useState({ title: '', content: '' });
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [reviewSearch, setReviewSearch] = useState('');
+  const [selectedReviewIds, setSelectedReviewIds] = useState<string[]>([]);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [viewingReview, setViewingReview] = useState<Review | null>(null);
 
   // 추가오더
   const [extraOrderForm, setExtraOrderForm] = useState({ title: '', prompt: '', memo: '' });
@@ -202,6 +205,13 @@ export default function PinkZone() {
     )
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  const reviewsPerPage = 10;
+  const reviewTotalPages = Math.max(1, Math.ceil(filteredReviews.length / reviewsPerPage));
+  const safeReviewPage = Math.min(reviewPage, reviewTotalPages);
+  const pagedReviews = filteredReviews.slice((safeReviewPage - 1) * reviewsPerPage, safeReviewPage * reviewsPerPage);
+  const pageReviewIds = pagedReviews.map(review => review.id);
+  const isAllPageReviewsSelected = pageReviewIds.length > 0 && pageReviewIds.every(id => selectedReviewIds.includes(id));
+
   const filteredExtraOrders = extraOrders
     .filter(o =>
       o.title.toLowerCase().includes(extraOrderSearch.toLowerCase()) ||
@@ -209,6 +219,11 @@ export default function PinkZone() {
       (o.memo || '').toLowerCase().includes(extraOrderSearch.toLowerCase())
     )
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  useEffect(() => {
+    setReviewPage(1);
+    setSelectedReviewIds([]);
+  }, [reviewSearch]);
 
   // ==================== 언니정보 ====================
   const openSisterModal = (sister?: Sister) => {
@@ -415,7 +430,53 @@ export default function PinkZone() {
     }
 
     setReviews(reviews.filter(r => r.id !== id));
+    setSelectedReviewIds(selectedReviewIds.filter(reviewId => reviewId !== id));
     setPrepSelectedReviewIds(prepSelectedReviewIds.filter(reviewId => reviewId !== id));
+  };
+
+  const toggleReviewSelection = (id: string) => {
+    setSelectedReviewIds(prev =>
+      prev.includes(id) ? prev.filter(reviewId => reviewId !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectPageReviews = () => {
+    setSelectedReviewIds(prev => {
+      if (isAllPageReviewsSelected) {
+        return prev.filter(id => !pageReviewIds.includes(id));
+      }
+
+      return Array.from(new Set([...prev, ...pageReviewIds]));
+    });
+  };
+
+  const deleteSelectedReviews = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
+    if (selectedReviewIds.length === 0) {
+      alert('삭제할 후기를 체크해주세요.');
+      return;
+    }
+
+    if (!confirm(`선택한 후기 ${selectedReviewIds.length}개를 삭제하시겠습니까?`)) return;
+
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .in('id', selectedReviewIds)
+      .eq('user_id', currentUserId);
+
+    if (error) {
+      console.error(error);
+      alert('선택 후기 삭제 실패');
+      return;
+    }
+
+    setReviews(reviews.filter(r => !selectedReviewIds.includes(r.id)));
+    setPrepSelectedReviewIds(prepSelectedReviewIds.filter(reviewId => !selectedReviewIds.includes(reviewId)));
+    setSelectedReviewIds([]);
+    alert('✅ 선택한 후기를 삭제했습니다.');
   };
 
   const startEditReview = (review: Review) => {
@@ -775,6 +836,9 @@ export default function PinkZone() {
     setReviewForm({ title: '', content: '' });
     setEditingReview(null);
     setReviewSearch('');
+    setSelectedReviewIds([]);
+    setReviewPage(1);
+    setViewingReview(null);
 
     // 추가오더 작성/수정 중이던 임시값
     setExtraOrderForm({ title: '', prompt: '', memo: '' });
@@ -1270,24 +1334,99 @@ export default function PinkZone() {
 
             {/* 목록 */}
             <div>
-              <div className="flex justify-between mb-6">
-                <h3 className="font-semibold text-xl">저장된 후기 ({filteredReviews.length}개)</h3>
-                <input type="text" placeholder="검색" value={reviewSearch} onChange={e => setReviewSearch(e.target.value)} className="border rounded-2xl px-5 py-3 w-80" />
+              <div className="flex justify-between items-center gap-4 mb-6">
+                <div>
+                  <h3 className="font-semibold text-xl">저장된 후기 ({filteredReviews.length}개)</h3>
+                  <p className="text-sm text-gray-500 mt-1">한 화면에 10개씩 표시됩니다.</p>
+                </div>
+                <input
+                  type="text"
+                  placeholder="검색"
+                  value={reviewSearch}
+                  onChange={e => setReviewSearch(e.target.value)}
+                  className="border rounded-2xl px-5 py-3 w-80"
+                />
               </div>
 
-              {filteredReviews.map(review => (
-                <div key={review.id} className="border rounded-2xl p-6 mb-6">
-                  <div className="flex justify-between text-sm text-gray-500 mb-2">
-                    <span>{review.date} • {review.sisterName}</span>
+              {filteredReviews.length > 0 && (
+                <div className="flex items-center justify-between gap-4 mb-4 bg-pink-50 border rounded-2xl px-5 py-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={isAllPageReviewsSelected}
+                      onChange={toggleSelectPageReviews}
+                      className="w-4 h-4"
+                    />
+                    현재 페이지 전체 선택
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-600">선택 {selectedReviewIds.length}개</span>
+                    <button
+                      type="button"
+                      onClick={deleteSelectedReviews}
+                      disabled={selectedReviewIds.length === 0}
+                      className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      선택 삭제
+                    </button>
                   </div>
-                  <h4 className="font-semibold text-lg mb-3">{review.title}</h4>
-                  <p className="text-gray-700 whitespace-pre-wrap mb-5">{review.content}</p>
-                  <div className="flex gap-4">
+                </div>
+              )}
+
+              {pagedReviews.map(review => (
+                <div key={review.id} className="relative border rounded-2xl p-6 mb-4 bg-white">
+                  <div className="absolute right-6 top-5 flex gap-3 text-sm">
+                    <button onClick={() => setViewingReview(review)} className="text-gray-700 hover:underline">보기</button>
                     <button onClick={() => startEditReview(review)} className="text-blue-600 hover:underline">수정</button>
                     <button onClick={() => deleteReview(review.id)} className="text-red-600 hover:underline">삭제</button>
                   </div>
+
+                  <div className="flex items-start gap-3 pr-32">
+                    <input
+                      type="checkbox"
+                      checked={selectedReviewIds.includes(review.id)}
+                      onChange={() => toggleReviewSelection(review.id)}
+                      className="w-5 h-5 mt-1 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-gray-500 mb-2">{review.date} • {review.sisterName}</div>
+                      <h4 className="font-semibold text-lg mb-2 truncate">{review.title}</h4>
+                      <p
+                        className="text-gray-700 text-sm leading-6 whitespace-pre-line break-keep overflow-hidden"
+                        style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                        }}
+                      >
+                        {review.content}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               ))}
+
+              {filteredReviews.length > 0 && (
+                <div className="flex items-center justify-center gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setReviewPage(page => Math.max(1, page - 1))}
+                    disabled={safeReviewPage === 1}
+                    className="px-4 py-2 border rounded-xl disabled:opacity-40"
+                  >
+                    이전
+                  </button>
+                  <span className="text-sm font-semibold">{safeReviewPage} / {reviewTotalPages}</span>
+                  <button
+                    type="button"
+                    onClick={() => setReviewPage(page => Math.min(reviewTotalPages, page + 1))}
+                    disabled={safeReviewPage === reviewTotalPages}
+                    className="px-4 py-2 border rounded-xl disabled:opacity-40"
+                  >
+                    다음
+                  </button>
+                </div>
+              )}
 
               {filteredReviews.length === 0 && (
                 <div className="text-center text-gray-500 border rounded-2xl p-10">
@@ -1392,6 +1531,30 @@ export default function PinkZone() {
           </div>
         )}
       </div>
+
+      {/* 언니후기 목록 보기 작은 창 */}
+      {viewingReview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden text-black">
+            <div className="flex items-center justify-between gap-4 px-6 py-5 border-b bg-pink-50">
+              <div>
+                <p className="text-sm text-gray-500">{viewingReview.date} · {viewingReview.sisterName}</p>
+                <h3 className="text-xl font-bold mt-1">{viewingReview.title}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingReview(null)}
+                className="shrink-0 px-4 py-2 border rounded-xl bg-white hover:bg-gray-50"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-gray-800">{viewingReview.content}</pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 3번 테이블 후기 보기 작은 창 */}
       {viewingPrepReview && (
