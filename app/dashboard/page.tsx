@@ -73,6 +73,7 @@ export default function PinkZone() {
   const [prepExtraSearch, setPrepExtraSearch] = useState('');
   const [prepReviewSearch, setPrepReviewSearch] = useState('');
   const [prepReviewCategoryFilter, setPrepReviewCategoryFilter] = useState('전체');
+  const [prepReviewSisterId, setPrepReviewSisterId] = useState('');
   const [isPrepReviewPickerOpen, setIsPrepReviewPickerOpen] = useState(true);
   const [prepSelectedSisterId, setPrepSelectedSisterId] = useState('');
   const [prepSelectedExtraOrderIds, setPrepSelectedExtraOrderIds] = useState<string[]>([]);
@@ -207,6 +208,7 @@ export default function PinkZone() {
 
   const selectedPrepSister = sisters.find(s => s.id === prepSelectedSisterId);
   const selectedPrepReviews = reviews.filter(r => prepSelectedReviewIds.includes(r.id));
+  const selectedPrepReviewSister = sisters.find(s => s.id === prepReviewSisterId);
 
   const filteredSisters = sisters
     .filter(s => sisterCategoryFilter === '전체' || s.category === sisterCategoryFilter)
@@ -742,6 +744,15 @@ export default function PinkZone() {
       (s.memo || '').toLowerCase().includes(prepSisterSearch.toLowerCase())
     );
 
+  const prepReviewCategorySisters = sisters
+    .filter(s => prepReviewCategoryFilter === '전체' || s.category === prepReviewCategoryFilter)
+    .filter(s =>
+      s.name.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      s.category.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      s.spec.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
+      (s.memo || '').toLowerCase().includes(prepReviewSearch.toLowerCase())
+    );
+
   const prepFilteredExtraOrders = extraOrders.filter(o =>
     o.title.toLowerCase().includes(prepExtraSearch.toLowerCase()) ||
     o.prompt.toLowerCase().includes(prepExtraSearch.toLowerCase()) ||
@@ -749,6 +760,7 @@ export default function PinkZone() {
   );
 
   const prepFilteredReviews = reviews
+    .filter(r => !prepReviewSisterId || r.sisterId === prepReviewSisterId || r.sisterName === selectedPrepReviewSister?.name)
     .filter(r => prepReviewCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === prepReviewCategoryFilter)
     .filter(r =>
       r.sisterName.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
@@ -798,6 +810,7 @@ export default function PinkZone() {
 
   const resetPrepReviewSelection = () => {
     setPrepSelectedReviewIds([]);
+    setPrepReviewSisterId('');
     setIsPrepReviewPickerOpen(true);
   };
 
@@ -910,6 +923,7 @@ export default function PinkZone() {
     setPrepExtraSearch('');
     setPrepReviewSearch('');
     setPrepReviewCategoryFilter('전체');
+    setPrepReviewSisterId('');
     setIsPrepReviewPickerOpen(true);
     setPrepSelectedSisterId('');
     setPrepSelectedExtraOrderIds([]);
@@ -1033,32 +1047,10 @@ export default function PinkZone() {
                 />
               </div>
 
-              <div className="bg-pink-50 rounded-2xl p-5 mb-5">
-                <div className="flex flex-wrap justify-center gap-4">
-                  {SISTER_CATEGORY_FILTERS.map(category => (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => setPrepSisterCategoryFilter(category)}
-                      className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
-                        prepSisterCategoryFilter === category
-                          ? 'bg-pink-600 text-white border-pink-600 shadow'
-                          : 'bg-white hover:bg-pink-100'
-                      }`}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-center text-sm text-gray-500 mt-3">
-                  카테고리 선택 혹은 전체보기로 저장된 언니를 불러옵니다.
-                </p>
-              </div>
-
-              {selectedPrepSister && (
-                <div className="mb-5 rounded-2xl border border-pink-200 bg-white px-6 py-5 flex items-center justify-between gap-4">
+              {selectedPrepSister ? (
+                <div className="rounded-2xl border border-pink-200 bg-white px-6 py-5 flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-lg font-bold text-pink-700">{selectedPrepSister.name} 선택됨</p>
+                    <p className="text-xl font-bold text-pink-700">{selectedPrepSister.name} 선택됨</p>
                     <p className="text-sm text-gray-600 mt-1">카테고리: {selectedPrepSister.category}</p>
                   </div>
                   <button
@@ -1069,77 +1061,52 @@ export default function PinkZone() {
                     다시 선택하기
                   </button>
                 </div>
-              )}
+              ) : (
+                <div>
+                  <div className="bg-pink-50 rounded-2xl p-5 mb-5">
+                    <div className="flex flex-wrap justify-center gap-4">
+                      {SISTER_CATEGORY_FILTERS.map(category => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => setPrepSisterCategoryFilter(category)}
+                          className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
+                            prepSisterCategoryFilter === category
+                              ? 'bg-pink-600 text-white border-pink-600 shadow'
+                              : 'bg-white hover:bg-pink-100'
+                          }`}
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-center text-sm text-gray-500 mt-3">
+                      카테고리 선택 또는 검색으로 언니를 찾은 뒤 이름 버튼을 눌러주세요.
+                    </p>
+                  </div>
 
-              {!selectedPrepSister && (
-              <div className="max-h-[420px] overflow-y-auto border rounded-2xl">
-                <table className="w-full text-left">
-                  <thead className="bg-pink-50 sticky top-0 z-10">
-                    <tr>
-                      <th className="px-4 py-3 w-20">선택</th>
-                      <th className="px-4 py-3 w-40">이름</th>
-                      <th className="px-4 py-3 w-24">카테고리</th>
-                      <th className="px-4 py-3">스펙/특징</th>
-                      <th className="px-4 py-3 w-56">메모</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {prepFilteredSisters.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="p-6 text-center text-gray-500">저장된 언니정보가 없습니다.</td>
-                      </tr>
-                    )}
-
-                    {prepFilteredSisters.map(s => (
-                      <tr key={s.id} className="border-t align-top hover:bg-pink-50">
-                        <td className="px-4 py-3">
-                          <input
-                            type="radio"
-                            name="prepSister"
-                            checked={prepSelectedSisterId === s.id}
-                            onChange={() => {
+                  <div className="min-h-[190px] rounded-2xl border border-pink-100 bg-white p-5">
+                    {prepFilteredSisters.length === 0 ? (
+                      <div className="text-center text-gray-500 py-12">조건에 맞는 언니정보가 없습니다.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {prepFilteredSisters.map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
                               setPrepSelectedSisterId(s.id);
-                              // 1번 테이블에서 언니정보를 선택하면 0번 테이블 이름도 항상 같이 변경
-                              // 이전 입력값이 남아서 다른 이름으로 합쳐지는 문제 방지
                               setTargetSisterName(s.name);
                             }}
-                            className="w-5 h-5"
-                          />
-                        </td>
-                        <td className="px-4 py-3 font-bold">{s.name}</td>
-                        <td className="px-4 py-3"><span className="inline-flex px-3 py-1 rounded-full bg-pink-100 text-pink-700 text-xs font-bold">{s.category}</span></td>
-                        <td className="px-4 py-3">
-                          <div
-                            className="text-sm leading-6"
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-line',
-                            }}
+                            className="px-6 py-3 rounded-xl border bg-pink-50 hover:bg-pink-100 font-bold text-lg shadow-sm"
+                            title={`${s.category} · ${s.spec}`}
                           >
-                            {s.spec}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div
-                            className="text-sm text-gray-600 leading-6"
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-line',
-                            }}
-                          >
-                            {s.memo || '-'}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {s.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </section>
@@ -1213,37 +1180,12 @@ export default function PinkZone() {
                 />
               </div>
 
-              <div className="bg-blue-50 rounded-2xl p-5 mb-5">
-                <div className="flex flex-wrap justify-center gap-4">
-                  {SISTER_CATEGORY_FILTERS.map(category => (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => {
-                        setPrepReviewCategoryFilter(category);
-                        setIsPrepReviewPickerOpen(true);
-                      }}
-                      className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
-                        prepReviewCategoryFilter === category
-                          ? 'bg-blue-600 text-white border-blue-600 shadow'
-                          : 'bg-white hover:bg-blue-100'
-                      }`}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-center text-sm text-gray-500 mt-3">
-                  언니정보 카테고리를 기준으로 저장된 후기를 불러옵니다.
-                </p>
-              </div>
-
-              {prepSelectedReviewIds.length > 0 && (
-                <div className="mb-5 rounded-2xl border border-blue-200 bg-white px-6 py-5">
+              {prepSelectedReviewIds.length > 0 && !isPrepReviewPickerOpen ? (
+                <div className="rounded-2xl border border-blue-200 bg-white px-6 py-5">
                   <div className="flex items-center justify-between gap-4 mb-3">
                     <div>
                       <p className="text-lg font-bold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
-                      <p className="text-sm text-gray-600 mt-1">선택 목록을 확인한 뒤 필요하면 다시 선택할 수 있습니다.</p>
+                      <p className="text-sm text-gray-600 mt-1">1개만 선택해도 사용 가능하고, 최대 2개까지 선택할 수 있습니다.</p>
                     </div>
                     <button
                       type="button"
@@ -1261,94 +1203,167 @@ export default function PinkZone() {
                     ))}
                   </div>
                 </div>
-              )}
+              ) : (
+                <div>
+                  <div className="bg-blue-50 rounded-2xl p-5 mb-5">
+                    <div className="flex flex-wrap justify-center gap-4">
+                      {SISTER_CATEGORY_FILTERS.map(category => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => {
+                            setPrepReviewCategoryFilter(category);
+                            setPrepReviewSisterId('');
+                            setPrepSelectedReviewIds([]);
+                            setIsPrepReviewPickerOpen(true);
+                          }}
+                          className={`min-w-[110px] px-6 py-3 rounded-xl border text-xl font-bold transition-all ${
+                            prepReviewCategoryFilter === category
+                              ? 'bg-blue-600 text-white border-blue-600 shadow'
+                              : 'bg-white hover:bg-blue-100'
+                          }`}
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-center text-sm text-gray-500 mt-3">
+                      카테고리 선택 후 언니 이름 버튼을 누르거나, 검색어로 후기를 찾아 선택하세요.
+                    </p>
+                  </div>
 
-              {isPrepReviewPickerOpen && (
-              <div>
-                <div className="flex items-center justify-between gap-4 mb-4">
-                  <p className="text-sm font-semibold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
-                  <button
-                    type="button"
-                    onClick={completePrepReviewSelection}
-                    className="px-5 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700"
-                  >
-                    선택 완료
-                  </button>
-                </div>
-                <div className="max-h-[360px] overflow-y-auto border rounded-2xl">
-                <table className="w-full text-left">
-                  <thead className="bg-blue-50 sticky top-0 z-10">
-                    <tr>
-                      <th className="p-3 w-16">선택</th>
-                      <th className="p-3 w-28">날짜</th>
-                      <th className="p-3 w-28">언니</th>
-                      <th className="p-3 w-24">카테고리</th>
-                      <th className="p-3 w-52">제목</th>
-                      <th className="p-3">내용 미리보기</th>
-                      <th className="p-3 w-24 text-center">보기</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {prepFilteredReviews.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="p-6 text-center text-gray-500">저장된 후기가 없습니다.</td>
-                      </tr>
-                    )}
+                  <div className="mb-5 min-h-[120px] rounded-2xl border border-blue-100 bg-white p-5">
+                    <div className="flex items-center justify-between gap-4 mb-4">
+                      <p className="font-bold text-blue-700">
+                        {selectedPrepReviewSister ? `${selectedPrepReviewSister.name} 후기 보기` : '언니 이름 선택'}
+                      </p>
+                      {selectedPrepReviewSister && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPrepReviewSisterId('');
+                            setPrepSelectedReviewIds([]);
+                          }}
+                          className="px-4 py-2 rounded-xl border bg-white hover:bg-blue-50 text-sm font-semibold"
+                        >
+                          언니 선택 해제
+                        </button>
+                      )}
+                    </div>
 
-                    {prepFilteredReviews.map(r => (
-                      <tr key={r.id} className="border-t align-top hover:bg-blue-50/40">
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            checked={prepSelectedReviewIds.includes(r.id)}
-                            onChange={() => togglePrepReview(r.id)}
-                            className="w-5 h-5"
-                          />
-                        </td>
-                        <td className="p-3 text-xs text-gray-500">{r.date}</td>
-                        <td className="p-3 font-bold">{r.sisterName}</td>
-                        <td className="p-3"><span className="inline-flex px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{getSisterCategoryByIdOrName(r.sisterId, r.sisterName)}</span></td>
-                        <td className="p-3 text-sm font-semibold">
-                          <div
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-line',
-                            }}
-                          >
-                            {r.title}
-                          </div>
-                        </td>
-                        <td className="p-3 text-sm text-gray-700">
-                          <div
-                            style={{
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-line',
-                            }}
-                          >
-                            {r.content}
-                          </div>
-                        </td>
-                        <td className="p-3 text-center">
+                    {prepReviewCategorySisters.length === 0 ? (
+                      <div className="text-center text-gray-500 py-6">조건에 맞는 언니정보가 없습니다.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-3">
+                        {prepReviewCategorySisters.map(s => (
                           <button
+                            key={s.id}
                             type="button"
-                            onClick={() => setViewingPrepReview(r)}
-                            className="px-3 py-2 border rounded-xl text-sm hover:bg-blue-50"
+                            onClick={() => {
+                              setPrepReviewSisterId(s.id);
+                              setPrepSelectedReviewIds([]);
+                              setIsPrepReviewPickerOpen(true);
+                            }}
+                            className={`px-5 py-3 rounded-xl border font-bold text-lg shadow-sm ${
+                              prepReviewSisterId === s.id
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-blue-50 hover:bg-blue-100'
+                            }`}
                           >
-                            보기
+                            {s.name}
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    <p className="text-sm font-semibold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
+                    <button
+                      type="button"
+                      onClick={completePrepReviewSelection}
+                      className="px-5 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700"
+                    >
+                      선택 완료
+                    </button>
+                  </div>
+
+                  <div className="max-h-[360px] overflow-y-auto border rounded-2xl">
+                    <table className="w-full text-left">
+                      <thead className="bg-blue-50 sticky top-0 z-10">
+                        <tr>
+                          <th className="p-3 w-16">선택</th>
+                          <th className="p-3 w-28">날짜</th>
+                          <th className="p-3 w-28">언니</th>
+                          <th className="p-3 w-24">카테고리</th>
+                          <th className="p-3 w-52">제목</th>
+                          <th className="p-3">내용 미리보기</th>
+                          <th className="p-3 w-24 text-center">보기</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prepFilteredReviews.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="p-6 text-center text-gray-500">
+                              {selectedPrepReviewSister ? '선택한 언니의 저장된 후기가 없습니다.' : '언니를 선택하거나 검색어를 입력해 후기를 찾아주세요.'}
+                            </td>
+                          </tr>
+                        )}
+
+                        {prepFilteredReviews.map(r => (
+                          <tr key={r.id} className="border-t align-top hover:bg-blue-50/40">
+                            <td className="p-3">
+                              <input
+                                type="checkbox"
+                                checked={prepSelectedReviewIds.includes(r.id)}
+                                onChange={() => togglePrepReview(r.id)}
+                                className="w-5 h-5"
+                              />
+                            </td>
+                            <td className="p-3 text-xs text-gray-500">{r.date}</td>
+                            <td className="p-3 font-bold">{r.sisterName}</td>
+                            <td className="p-3"><span className="inline-flex px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{getSisterCategoryByIdOrName(r.sisterId, r.sisterName)}</span></td>
+                            <td className="p-3 text-sm font-semibold">
+                              <div
+                                style={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  whiteSpace: 'pre-line',
+                                }}
+                              >
+                                {r.title}
+                              </div>
+                            </td>
+                            <td className="p-3 text-sm text-gray-700">
+                              <div
+                                style={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  whiteSpace: 'pre-line',
+                                }}
+                              >
+                                {r.content}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setViewingPrepReview(r)}
+                                className="px-3 py-2 border rounded-xl text-sm hover:bg-blue-50"
+                              >
+                                보기
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
               )}
             </section>
 
@@ -1557,6 +1572,7 @@ export default function PinkZone() {
                       type="button"
                       onClick={() => {
                         setReviewSisterCategoryFilter(category);
+                        setReviewSearch('');
                         setReviewPage(1);
                         setSelectedReviewIds([]);
                       }}
@@ -1570,6 +1586,58 @@ export default function PinkZone() {
                     </button>
                   ))}
                 </div>
+
+                {reviewSisterCategoryFilter !== '전체' && (
+                  <div className="mt-4 border-t border-pink-200 pt-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <p className="text-sm font-semibold text-gray-700">
+                        {reviewSisterCategoryFilter} 카테고리 언니 바로 선택
+                      </p>
+                      {reviewSearch && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReviewSearch('');
+                            setReviewPage(1);
+                            setSelectedReviewIds([]);
+                          }}
+                          className="text-sm text-pink-600 font-semibold hover:underline"
+                        >
+                          이름 선택 해제
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {sisters
+                        .filter(s => s.category === reviewSisterCategoryFilter)
+                        .map(s => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setReviewSearch(s.name);
+                              setReviewPage(1);
+                              setSelectedReviewIds([]);
+                            }}
+                            className={`px-4 py-2 rounded-xl border text-sm font-bold transition-all ${
+                              reviewSearch === s.name
+                                ? 'bg-black text-white border-black shadow'
+                                : 'bg-white hover:bg-pink-100'
+                            }`}
+                          >
+                            {s.name}
+                          </button>
+                        ))}
+
+                      {sisters.filter(s => s.category === reviewSisterCategoryFilter).length === 0 && (
+                        <span className="text-sm text-gray-500">
+                          이 카테고리에 등록된 언니정보가 없습니다.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-between items-center gap-4 mb-6">
