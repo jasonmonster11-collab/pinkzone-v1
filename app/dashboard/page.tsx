@@ -1194,8 +1194,8 @@ export default function PinkZone() {
                       <button onClick={() => deleteSister(s.id)} className="text-red-600 hover:underline">삭제</button>
                     </div>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap">{s.spec}</p>
-                  {s.memo && <p className="mt-3 text-sm text-gray-600 whitespace-pre-wrap">{s.memo}</p>}
+                  <p className="mt-3 whitespace-pre-line break-keep leading-7">{s.spec}</p>
+                  {s.memo && <p className="mt-3 text-sm text-gray-600 whitespace-pre-line break-keep leading-7">{s.memo}</p>}
                 </div>
               ))}
 
