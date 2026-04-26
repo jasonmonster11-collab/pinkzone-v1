@@ -31,6 +31,7 @@ type ExtraOrder = {
 export default function PinkZone() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const [activeMenu, setActiveMenu] = useState('후기생성준비기');
@@ -79,7 +80,9 @@ export default function PinkZone() {
         return;
       }
 
+      setUserId(user.id);
       setUserEmail(user.email ?? null);
+      await loadAllData(user.id);
       setCheckingAuth(false);
     }
 
@@ -91,33 +94,96 @@ export default function PinkZone() {
     router.push('/');
   };
 
-  useEffect(() => {
-    const savedSisters = localStorage.getItem('pinkzone_sisters');
-    const savedReviews = localStorage.getItem('pinkzone_reviews');
-    const savedExtraOrders = localStorage.getItem('pinkzone_extra_orders');
-    if (savedSisters) setSisters(JSON.parse(savedSisters));
-    if (savedReviews) setReviews(JSON.parse(savedReviews));
-    if (savedExtraOrders) setExtraOrders(JSON.parse(savedExtraOrders));
-
-    // 5번 테이블은 새로고침 시 이전 생성 내용이 남지 않도록 초기화
-    localStorage.removeItem('pinkzone_last_merged_prompt');
-  }, []);
-
   const todayText = () => new Date().toISOString().split('T')[0];
 
-  const saveSisters = (updated: Sister[]) => {
-    setSisters(updated);
-    localStorage.setItem('pinkzone_sisters', JSON.stringify(updated));
+  const loadAllData = async (currentUserId: string) => {
+    const [sistersResult, reviewsResult, extraOrdersResult] = await Promise.all([
+      supabase
+        .from('sisters')
+        .select('id, name, spec, memo, created_at')
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('reviews')
+        .select('id, sister_id, sister_name, review_date, title, content, created_at')
+        .eq('user_id', currentUserId)
+        .order('review_date', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('extra_orders')
+        .select('id, title, prompt, memo, order_date, created_at')
+        .eq('user_id', currentUserId)
+        .order('order_date', { ascending: false })
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (sistersResult.error || reviewsResult.error || extraOrdersResult.error) {
+      console.error({
+        sistersError: sistersResult.error,
+        reviewsError: reviewsResult.error,
+        extraOrdersError: extraOrdersResult.error,
+      });
+      alert('DB 데이터를 불러오지 못했습니다. Supabase 테이블과 RLS 정책을 먼저 확인해주세요.');
+      return;
+    }
+
+    setSisters((sistersResult.data || []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      spec: row.spec,
+      memo: row.memo || '',
+    })));
+
+    setReviews((reviewsResult.data || []).map((row) => ({
+      id: row.id,
+      sisterId: row.sister_id || '',
+      sisterName: row.sister_name,
+      date: row.review_date,
+      title: row.title,
+      content: row.content,
+    })));
+
+    setExtraOrders((extraOrdersResult.data || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      prompt: row.prompt,
+      memo: row.memo || '',
+      date: row.order_date,
+    })));
   };
 
-  const saveReviews = (updated: Review[]) => {
-    setReviews(updated);
-    localStorage.setItem('pinkzone_reviews', JSON.stringify(updated));
+  const requireUserId = () => {
+    if (!userId) {
+      alert('로그인이 필요합니다. 다시 로그인해주세요.');
+      router.push('/');
+      return null;
+    }
+
+    return userId;
   };
 
-  const saveExtraOrders = (updated: ExtraOrder[]) => {
-    setExtraOrders(updated);
-    localStorage.setItem('pinkzone_extra_orders', JSON.stringify(updated));
+  const downloadBackup = () => {
+    const backup = {
+      app: 'pink-zone',
+      userEmail,
+      exportedAt: new Date().toISOString(),
+      sisters,
+      reviews,
+      extraOrders,
+    };
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = `pink-zone-backup-${todayText()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   // ==================== 공통 필터 ====================
@@ -156,28 +222,90 @@ export default function PinkZone() {
     setShowSisterModal(true);
   };
 
-  const saveSister = () => {
+  const saveSister = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     if (!sisterForm.name || !sisterForm.spec) return alert('이름과 스펙은 필수입니다.');
 
     if (editingSister) {
-      const updated = sisters.map(s => s.id === editingSister.id ? { ...s, ...sisterForm } : s);
-      saveSisters(updated);
+      const { data, error } = await supabase
+        .from('sisters')
+        .update({
+          name: sisterForm.name,
+          spec: sisterForm.spec,
+          memo: sisterForm.memo,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingSister.id)
+        .eq('user_id', currentUserId)
+        .select('id, name, spec, memo')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('언니정보 수정 실패');
+        return;
+      }
+
+      setSisters(sisters.map(s => s.id === editingSister.id ? {
+        id: data.id,
+        name: data.name,
+        spec: data.spec,
+        memo: data.memo || '',
+      } : s));
     } else {
-      const newSister = { id: Date.now().toString(), ...sisterForm };
-      saveSisters([...sisters, newSister]);
+      const { data, error } = await supabase
+        .from('sisters')
+        .insert({
+          user_id: currentUserId,
+          name: sisterForm.name,
+          spec: sisterForm.spec,
+          memo: sisterForm.memo,
+        })
+        .select('id, name, spec, memo')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('언니정보 등록 실패');
+        return;
+      }
+
+      setSisters([{
+        id: data.id,
+        name: data.name,
+        spec: data.spec,
+        memo: data.memo || '',
+      }, ...sisters]);
     }
 
     setShowSisterModal(false);
     alert(editingSister ? '✅ 수정 완료!' : '✅ 등록 완료!');
   };
 
-  const deleteSister = (id: string) => {
+  const deleteSister = async (id: string) => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     const sister = sisters.find(s => s.id === id);
     if (!sister) return;
 
     if (!confirm(`정말 ${sister.name} 정보를 삭제하시겠습니까?\n※ 기존에 저장된 후기는 삭제되지 않습니다.`)) return;
 
-    saveSisters(sisters.filter(s => s.id !== id));
+    const { error } = await supabase
+      .from('sisters')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', currentUserId);
+
+    if (error) {
+      console.error(error);
+      alert('언니정보 삭제 실패');
+      return;
+    }
+
+    setSisters(sisters.filter(s => s.id !== id));
 
     if (selectedSisterId === id) setSelectedSisterId('');
     if (prepSelectedSisterId === id) setPrepSelectedSisterId('');
@@ -186,7 +314,10 @@ export default function PinkZone() {
   };
 
   // ==================== 후기 ====================
-  const saveReview = () => {
+  const saveReview = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     if (!selectedSisterId || !reviewForm.title || !reviewForm.content) {
       return alert('언니, 제목, 내용을 모두 입력해주세요.');
     }
@@ -195,29 +326,68 @@ export default function PinkZone() {
     if (!sister) return;
 
     if (editingReview) {
-      const updated = reviews.map(r => r.id === editingReview.id
+      const { data, error } = await supabase
+        .from('reviews')
+        .update({
+          sister_id: selectedSisterId,
+          sister_name: sister.name,
+          review_date: todayText(),
+          title: reviewForm.title,
+          content: reviewForm.content,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingReview.id)
+        .eq('user_id', currentUserId)
+        .select('id, sister_id, sister_name, review_date, title, content')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('후기 수정 실패');
+        return;
+      }
+
+      setReviews(reviews.map(r => r.id === editingReview.id
         ? {
-            ...r,
-            sisterId: selectedSisterId,
-            sisterName: sister.name,
-            title: reviewForm.title,
-            content: reviewForm.content,
-            date: todayText(),
+            id: data.id,
+            sisterId: data.sister_id || '',
+            sisterName: data.sister_name,
+            date: data.review_date,
+            title: data.title,
+            content: data.content,
           }
         : r
-      );
-      saveReviews(updated);
+      ));
       alert('✅ 수정되었습니다!');
     } else {
+      const { data, error } = await supabase
+        .from('reviews')
+        .insert({
+          user_id: currentUserId,
+          sister_id: selectedSisterId,
+          sister_name: sister.name,
+          review_date: todayText(),
+          title: reviewForm.title,
+          content: reviewForm.content,
+        })
+        .select('id, sister_id, sister_name, review_date, title, content')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('후기 저장 실패');
+        return;
+      }
+
       const review: Review = {
-        id: Date.now().toString(),
-        sisterId: selectedSisterId,
-        sisterName: sister.name,
-        date: todayText(),
-        title: reviewForm.title,
-        content: reviewForm.content,
+        id: data.id,
+        sisterId: data.sister_id || '',
+        sisterName: data.sister_name,
+        date: data.review_date,
+        title: data.title,
+        content: data.content,
       };
-      saveReviews([...reviews, review]);
+      setReviews([review, ...reviews]);
       alert('✅ 저장되었습니다!');
     }
 
@@ -226,9 +396,25 @@ export default function PinkZone() {
     setSelectedSisterId('');
   };
 
-  const deleteReview = (id: string) => {
+  const deleteReview = async (id: string) => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     if (!confirm('정말 삭제하시겠습니까?')) return;
-    saveReviews(reviews.filter(r => r.id !== id));
+
+    const { error } = await supabase
+      .from('reviews')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', currentUserId);
+
+    if (error) {
+      console.error(error);
+      alert('후기 삭제 실패');
+      return;
+    }
+
+    setReviews(reviews.filter(r => r.id !== id));
     setPrepSelectedReviewIds(prepSelectedReviewIds.filter(reviewId => reviewId !== id));
   };
 
@@ -347,27 +533,73 @@ export default function PinkZone() {
   };
 
   // ==================== 추가오더 ====================
-  const saveExtraOrder = () => {
+  const saveExtraOrder = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     if (!extraOrderForm.title || !extraOrderForm.prompt) {
       return alert('제목과 추가 프롬프트 내용은 필수입니다.');
     }
 
     if (editingExtraOrder) {
-      const updated = extraOrders.map(o => o.id === editingExtraOrder.id
-        ? { ...o, ...extraOrderForm, date: todayText() }
+      const { data, error } = await supabase
+        .from('extra_orders')
+        .update({
+          title: extraOrderForm.title,
+          prompt: extraOrderForm.prompt,
+          memo: extraOrderForm.memo,
+          order_date: todayText(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingExtraOrder.id)
+        .eq('user_id', currentUserId)
+        .select('id, title, prompt, memo, order_date')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('추가오더 수정 실패');
+        return;
+      }
+
+      setExtraOrders(extraOrders.map(o => o.id === editingExtraOrder.id
+        ? {
+            id: data.id,
+            title: data.title,
+            prompt: data.prompt,
+            memo: data.memo || '',
+            date: data.order_date,
+          }
         : o
-      );
-      saveExtraOrders(updated);
+      ));
       alert('✅ 추가오더가 수정되었습니다!');
     } else {
+      const { data, error } = await supabase
+        .from('extra_orders')
+        .insert({
+          user_id: currentUserId,
+          title: extraOrderForm.title,
+          prompt: extraOrderForm.prompt,
+          memo: extraOrderForm.memo,
+          order_date: todayText(),
+        })
+        .select('id, title, prompt, memo, order_date')
+        .single();
+
+      if (error) {
+        console.error(error);
+        alert('추가오더 저장 실패');
+        return;
+      }
+
       const newOrder: ExtraOrder = {
-        id: Date.now().toString(),
-        title: extraOrderForm.title,
-        prompt: extraOrderForm.prompt,
-        memo: extraOrderForm.memo,
-        date: todayText(),
+        id: data.id,
+        title: data.title,
+        prompt: data.prompt,
+        memo: data.memo || '',
+        date: data.order_date,
       };
-      saveExtraOrders([...extraOrders, newOrder]);
+      setExtraOrders([newOrder, ...extraOrders]);
       alert('✅ 추가오더가 저장되었습니다!');
     }
 
@@ -389,9 +621,25 @@ export default function PinkZone() {
     setExtraOrderForm({ title: '', prompt: '', memo: '' });
   };
 
-  const deleteExtraOrder = (id: string) => {
+  const deleteExtraOrder = async (id: string) => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
     if (!confirm('정말 삭제하시겠습니까?')) return;
-    saveExtraOrders(extraOrders.filter(o => o.id !== id));
+
+    const { error } = await supabase
+      .from('extra_orders')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', currentUserId);
+
+    if (error) {
+      console.error(error);
+      alert('추가오더 삭제 실패');
+      return;
+    }
+
+    setExtraOrders(extraOrders.filter(o => o.id !== id));
     setPrepSelectedExtraOrderIds(prepSelectedExtraOrderIds.filter(orderId => orderId !== id));
   };
 
@@ -600,6 +848,13 @@ export default function PinkZone() {
               <p className="text-[11px] text-gray-500 leading-tight">로그인 계정</p>
               <p className="text-xs font-semibold text-gray-800 leading-tight">{userEmail}</p>
             </div>
+            <button
+              type="button"
+              onClick={downloadBackup}
+              className="px-4 py-2 rounded-xl bg-pink-600 text-white text-sm font-bold whitespace-nowrap hover:bg-pink-700"
+            >
+              백업 다운로드
+            </button>
             <button
               type="button"
               onClick={handleLogout}
