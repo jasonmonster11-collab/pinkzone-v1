@@ -84,19 +84,39 @@ export default function PinkZone() {
 
   useEffect(() => {
     async function checkUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!user) {
+        if (!user) {
+          router.push('/');
+          return;
+        }
+
+        setUserId(user.id);
+        setUserEmail(user.email ?? null);
+        await loadAllData(user.id);
+        setCheckingAuth(false);
+      } catch (error) {
+        console.error('Auth check failed:', error);
+
+        // Supabase refresh token이 만료/초기화되었을 때 남아있는 로컬 세션 정리
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch (signOutError) {
+          console.error('Local sign out failed:', signOutError);
+        }
+
+        if (typeof window !== 'undefined') {
+          Object.keys(window.localStorage)
+            .filter((key) => key.startsWith('sb-') || key.includes('supabase'))
+            .forEach((key) => window.localStorage.removeItem(key));
+        }
+
+        setCheckingAuth(false);
         router.push('/');
-        return;
       }
-
-      setUserId(user.id);
-      setUserEmail(user.email ?? null);
-      await loadAllData(user.id);
-      setCheckingAuth(false);
     }
 
     checkUser();
@@ -785,11 +805,6 @@ export default function PinkZone() {
       return;
     }
 
-    if (prepSelectedReviewIds.length >= 2) {
-      alert('언니 후기는 최대 2개까지만 불러올 수 있습니다.');
-      return;
-    }
-
     const nextIds = [...prepSelectedReviewIds, id];
     setPrepSelectedReviewIds(nextIds);
   };
@@ -841,7 +856,7 @@ export default function PinkZone() {
           ).join('\n\n')
         : '선택된 추가오더 없음',
       '',
-      '[3번 테이블] 불러온 기존 언니 후기 2개',
+      '[3번 테이블] 불러온 기존 언니 후기',
       selectedReviews.length
         ? selectedReviews.map((r, index) =>
             `${index + 1}. ${r.date} / ${r.sisterName} / ${r.title}\n${r.content}`
@@ -1012,7 +1027,7 @@ export default function PinkZone() {
             <div className="bg-white rounded-3xl shadow p-8">
               <h2 className="text-3xl font-bold mb-3">후기생성준비기</h2>
               <p className="text-gray-600">
-                언니정보, 추가오더, 기존 후기 2개, 추가사항을 불러온 뒤 5번 테이블에서 하나의 프롬프트로 합쳐 저장하고 메모장 파일로 내려받는 화면입니다.
+                언니정보, 추가오더, 기존 후기를 필요한 만큼 선택하고 추가사항을 불러온 뒤 5번 테이블에서 하나의 프롬프트로 합쳐 저장하고 메모장 파일로 내려받는 화면입니다.
               </p>
             </div>
 
@@ -1169,7 +1184,7 @@ export default function PinkZone() {
               <div className="flex items-center justify-between gap-3 mb-5">
                 <div className="flex items-center gap-3">
                   <span className="bg-blue-600 text-white font-bold px-4 py-2 rounded-xl">3번 테이블</span>
-                  <h3 className="text-2xl font-bold">언니후기 2개 불러오기</h3>
+                  <h3 className="text-2xl font-bold">언니후기 불러오기</h3>
                 </div>
                 <input
                   type="text"
@@ -1184,8 +1199,8 @@ export default function PinkZone() {
                 <div className="rounded-2xl border border-blue-200 bg-white px-6 py-5">
                   <div className="flex items-center justify-between gap-4 mb-3">
                     <div>
-                      <p className="text-lg font-bold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
-                      <p className="text-sm text-gray-600 mt-1">1개만 선택해도 사용 가능하고, 최대 2개까지 선택할 수 있습니다.</p>
+                      <p className="text-lg font-bold text-blue-700">선택된 후기 {selectedPrepReviews.length}개</p>
+                      <p className="text-sm text-gray-600 mt-1">필요한 후기를 개수 제한 없이 선택할 수 있습니다.</p>
                     </div>
                     <button
                       type="button"
@@ -1278,7 +1293,7 @@ export default function PinkZone() {
                   </div>
 
                   <div className="flex items-center justify-between gap-4 mb-4">
-                    <p className="text-sm font-semibold text-blue-700">선택된 후기 {selectedPrepReviews.length}/2개</p>
+                    <p className="text-sm font-semibold text-blue-700">선택된 후기 {selectedPrepReviews.length}개</p>
                     <button
                       type="button"
                       onClick={completePrepReviewSelection}
