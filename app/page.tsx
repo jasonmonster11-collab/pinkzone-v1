@@ -41,6 +41,26 @@ export default function HomePage() {
     >
       <div
         style={{
+          position: "fixed",
+          right: "20px",
+          top: "20px",
+          zIndex: 9999,
+          border: "1px solid #ff4fa0",
+          background: "#ff4fa0",
+          color: "#fff",
+          borderRadius: "999px",
+          padding: "8px 14px",
+          fontSize: "12px",
+          fontWeight: 800,
+          letterSpacing: "1px",
+          boxShadow: "0 8px 24px rgba(255,79,160,0.35)",
+        }}
+      >
+        최신패치 4/27
+      </div>
+
+      <div
+        style={{
           width: "100%",
           maxWidth: "420px",
           background: "#111",

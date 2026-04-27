@@ -1111,16 +1111,19 @@ export default function PinkZone() {
     setActiveMenu(menuId);
   };
 
-  if (checkingAuth) {
-    return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-xl font-bold mb-2">PINK ZONE</div>
-          <p className="text-sm text-gray-400">로그인 확인 중...</p>
+if (checkingAuth) {
+  return (
+    <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="text-center">
+        <div className="mx-auto mb-5 inline-flex rounded-full border border-pink-500/70 bg-black/80 px-4 py-2 text-xs font-bold tracking-widest text-pink-400 shadow-lg">
+          최신패치 4/27
         </div>
-      </main>
-    );
-  }
+        <div className="text-xl font-bold mb-2">PINK ZONE</div>
+        <p className="text-sm text-gray-400">로그인 확인 중...</p>
+      </div>
+    </main>
+  );
+}
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 text-black">
