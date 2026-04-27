@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -49,10 +49,12 @@ type UserProfile = {
   roleLevel: number;
   tokens: number;
   isAdmin: boolean;
+  canGenerateReview: boolean;
 };
 
 const SISTER_CATEGORIES = ['안마', '건마', '오피', '술집', '휴게텔', '기타'];
 const SISTER_CATEGORY_FILTERS = ['전체', ...SISTER_CATEGORIES];
+const MERGE_PROMPT_TOKEN_COST = 50;
 
 export default function PinkZone() {
   const router = useRouter();
@@ -63,6 +65,7 @@ export default function PinkZone() {
     roleLevel: 5,
     tokens: 0,
     isAdmin: false,
+    canGenerateReview: false,
   });
   const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -83,6 +86,8 @@ export default function PinkZone() {
   ];
 
   const isReviewMenuActive = reviewMenus.some((m) => m.id === activeMenu);
+  const REVIEW_COMBINE_TOKEN_COST = 1;
+  const canUseReviewGenerator = userProfile.isAdmin || userProfile.canGenerateReview;
 
   const [sisters, setSisters] = useState<Sister[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -180,13 +185,13 @@ export default function PinkZone() {
   const loadUserProfile = async (currentUserId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('role_level, tokens, is_admin')
+      .select('*')
       .eq('id', currentUserId)
       .single();
 
     if (error) {
       console.warn('Profile load failed:', error);
-      setUserProfile({ roleLevel: 5, tokens: 0, isAdmin: false });
+      setUserProfile({ roleLevel: 5, tokens: 0, isAdmin: false, canGenerateReview: false });
       return;
     }
 
@@ -195,6 +200,7 @@ export default function PinkZone() {
       roleLevel,
       tokens: Number(data?.tokens ?? 0),
       isAdmin: Boolean(data?.is_admin) || roleLevel === 1 || roleLevel === 2,
+      canGenerateReview: Boolean(data?.can_generate_review),
     });
   };
 
@@ -450,35 +456,71 @@ export default function PinkZone() {
   };
 
   // ==================== 공통 필터 ====================
+  const sisterCategoryMap = useMemo(() => {
+    const nextMap = new Map<string, string>();
+
+    sisters.forEach((sister) => {
+      nextMap.set(sister.id, sister.category || '기타');
+      nextMap.set(sister.name, sister.category || '기타');
+    });
+
+    return nextMap;
+  }, [sisters]);
+
   const getSisterCategoryByIdOrName = (sisterId: string, sisterName: string) => {
-    const matchedSister = sisters.find(s => s.id === sisterId || s.name === sisterName);
-    return matchedSister?.category || '기타';
+    return sisterCategoryMap.get(sisterId) || sisterCategoryMap.get(sisterName) || '기타';
   };
 
-  const selectedPrepSister = sisters.find(s => s.id === prepSelectedSisterId);
-  const selectedPrepReviews = reviews.filter(r => prepSelectedReviewIds.includes(r.id));
-  const selectedPrepReviewSister = sisters.find(s => s.id === prepReviewSisterId);
+  const selectedPrepSister = useMemo(
+    () => sisters.find(s => s.id === prepSelectedSisterId),
+    [sisters, prepSelectedSisterId]
+  );
 
-  const filteredSisters = sisters
-    .filter(s => sisterCategoryFilter === '전체' || s.category === sisterCategoryFilter)
-    .filter(s =>
-      s.name.toLowerCase().includes(sisterSearch.toLowerCase()) ||
-      s.category.toLowerCase().includes(sisterSearch.toLowerCase()) ||
-      s.spec.toLowerCase().includes(sisterSearch.toLowerCase()) ||
-      (s.memo || '').toLowerCase().includes(sisterSearch.toLowerCase())
-    );
+  const selectedPrepReviews = useMemo(
+    () => reviews.filter(r => prepSelectedReviewIds.includes(r.id)),
+    [reviews, prepSelectedReviewIds]
+  );
 
-  const filteredReviews = reviews
-    .filter(r => reviewSisterCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === reviewSisterCategoryFilter)
-    .filter(r =>
-      r.sisterName.toLowerCase().includes(reviewSearch.toLowerCase()) ||
-      getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase().includes(reviewSearch.toLowerCase()) ||
-      r.title.toLowerCase().includes(reviewSearch.toLowerCase()) ||
-      r.content.toLowerCase().includes(reviewSearch.toLowerCase())
-    )
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const selectedPrepReviewSister = useMemo(
+    () => sisters.find(s => s.id === prepReviewSisterId),
+    [sisters, prepReviewSisterId]
+  );
 
-  const reviewFormSisters = sisters.filter(s => reviewSisterCategoryFilter === '전체' || s.category === reviewSisterCategoryFilter);
+  const filteredSisters = useMemo(() => {
+    const keyword = sisterSearch.toLowerCase();
+
+    return sisters
+      .filter(s => sisterCategoryFilter === '전체' || s.category === sisterCategoryFilter)
+      .filter(s =>
+        s.name.toLowerCase().includes(keyword) ||
+        s.category.toLowerCase().includes(keyword) ||
+        s.spec.toLowerCase().includes(keyword) ||
+        (s.memo || '').toLowerCase().includes(keyword)
+      );
+  }, [sisters, sisterCategoryFilter, sisterSearch]);
+
+  const filteredReviews = useMemo(() => {
+    const keyword = reviewSearch.toLowerCase();
+
+    return reviews
+      .filter(r => reviewSisterCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === reviewSisterCategoryFilter)
+      .filter(r => {
+        const category = getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase();
+
+        return (
+          r.sisterName.toLowerCase().includes(keyword) ||
+          category.includes(keyword) ||
+          r.title.toLowerCase().includes(keyword) ||
+          r.content.toLowerCase().includes(keyword)
+        );
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [reviews, reviewSisterCategoryFilter, reviewSearch, sisterCategoryMap]);
+
+  const reviewFormSisters = useMemo(
+    () => sisters.filter(s => reviewSisterCategoryFilter === '전체' || s.category === reviewSisterCategoryFilter),
+    [sisters, reviewSisterCategoryFilter]
+  );
 
   const reviewsPerPage = 10;
   const reviewTotalPages = Math.max(1, Math.ceil(filteredReviews.length / reviewsPerPage));
@@ -984,39 +1026,59 @@ export default function PinkZone() {
   };
 
   // ==================== 후기생성준비기 ====================
-  const prepFilteredSisters = sisters
-    .filter(s => prepSisterCategoryFilter === '전체' || s.category === prepSisterCategoryFilter)
-    .filter(s =>
-      s.name.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
-      s.category.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
-      s.spec.toLowerCase().includes(prepSisterSearch.toLowerCase()) ||
-      (s.memo || '').toLowerCase().includes(prepSisterSearch.toLowerCase())
-    );
+  const prepFilteredSisters = useMemo(() => {
+    const keyword = prepSisterSearch.toLowerCase();
 
-  const prepReviewCategorySisters = sisters
-    .filter(s => prepReviewCategoryFilter === '전체' || s.category === prepReviewCategoryFilter)
-    .filter(s =>
-      s.name.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      s.category.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      s.spec.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      (s.memo || '').toLowerCase().includes(prepReviewSearch.toLowerCase())
-    );
+    return sisters
+      .filter(s => prepSisterCategoryFilter === '전체' || s.category === prepSisterCategoryFilter)
+      .filter(s =>
+        s.name.toLowerCase().includes(keyword) ||
+        s.category.toLowerCase().includes(keyword) ||
+        s.spec.toLowerCase().includes(keyword) ||
+        (s.memo || '').toLowerCase().includes(keyword)
+      );
+  }, [sisters, prepSisterCategoryFilter, prepSisterSearch]);
 
-  const prepFilteredExtraOrders = extraOrders.filter(o =>
-    o.title.toLowerCase().includes(prepExtraSearch.toLowerCase()) ||
-    o.prompt.toLowerCase().includes(prepExtraSearch.toLowerCase()) ||
-    (o.memo || '').toLowerCase().includes(prepExtraSearch.toLowerCase())
-  );
+  const prepReviewCategorySisters = useMemo(() => {
+    const keyword = prepReviewSearch.toLowerCase();
 
-  const prepFilteredReviews = reviews
-    .filter(r => !prepReviewSisterId || r.sisterId === prepReviewSisterId || r.sisterName === selectedPrepReviewSister?.name)
-    .filter(r => prepReviewCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === prepReviewCategoryFilter)
-    .filter(r =>
-      r.sisterName.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      r.title.toLowerCase().includes(prepReviewSearch.toLowerCase()) ||
-      r.content.toLowerCase().includes(prepReviewSearch.toLowerCase())
+    return sisters
+      .filter(s => prepReviewCategoryFilter === '전체' || s.category === prepReviewCategoryFilter)
+      .filter(s =>
+        s.name.toLowerCase().includes(keyword) ||
+        s.category.toLowerCase().includes(keyword) ||
+        s.spec.toLowerCase().includes(keyword) ||
+        (s.memo || '').toLowerCase().includes(keyword)
+      );
+  }, [sisters, prepReviewCategoryFilter, prepReviewSearch]);
+
+  const prepFilteredExtraOrders = useMemo(() => {
+    const keyword = prepExtraSearch.toLowerCase();
+
+    return extraOrders.filter(o =>
+      o.title.toLowerCase().includes(keyword) ||
+      o.prompt.toLowerCase().includes(keyword) ||
+      (o.memo || '').toLowerCase().includes(keyword)
     );
+  }, [extraOrders, prepExtraSearch]);
+
+  const prepFilteredReviews = useMemo(() => {
+    const keyword = prepReviewSearch.toLowerCase();
+
+    return reviews
+      .filter(r => !prepReviewSisterId || r.sisterId === prepReviewSisterId || r.sisterName === selectedPrepReviewSister?.name)
+      .filter(r => prepReviewCategoryFilter === '전체' || getSisterCategoryByIdOrName(r.sisterId, r.sisterName) === prepReviewCategoryFilter)
+      .filter(r => {
+        const category = getSisterCategoryByIdOrName(r.sisterId, r.sisterName).toLowerCase();
+
+        return (
+          r.sisterName.toLowerCase().includes(keyword) ||
+          category.includes(keyword) ||
+          r.title.toLowerCase().includes(keyword) ||
+          r.content.toLowerCase().includes(keyword)
+        );
+      });
+  }, [reviews, prepReviewSisterId, selectedPrepReviewSister?.name, prepReviewCategoryFilter, prepReviewSearch, sisterCategoryMap]);
 
   const togglePrepExtraOrder = (id: string) => {
     if (prepSelectedExtraOrderIds.includes(id)) {
@@ -1058,7 +1120,36 @@ export default function PinkZone() {
     setIsPrepReviewPickerOpen(true);
   };
 
-  const buildMergedPrompt = () => {
+  const buildMergedPrompt = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
+    const { data: latestProfile, error: latestProfileError } = await supabase
+      .from('profiles')
+      .select('tokens')
+      .eq('id', currentUserId)
+      .single();
+
+    if (latestProfileError) {
+      alert(
+        '토큰 정보를 확인하지 못했습니다.\n\n' +
+        'message: ' + (latestProfileError.message || '-') + '\n' +
+        'code: ' + (latestProfileError.code || '-')
+      );
+      return;
+    }
+
+    const currentTokens = Number(latestProfile?.tokens ?? 0);
+
+    if (currentTokens < MERGE_PROMPT_TOKEN_COST) {
+      alert(
+        `토큰이 부족합니다.\n\n` +
+        `합쳐서 저장에는 ${MERGE_PROMPT_TOKEN_COST} 토큰이 필요합니다.\n` +
+        `현재 보유 토큰: ${currentTokens.toLocaleString()}`
+      );
+      return;
+    }
+
     const selectedSister = sisters.find(s => s.id === prepSelectedSisterId);
     const selectedExtraOrders = extraOrders.filter(o => prepSelectedExtraOrderIds.includes(o.id));
     const selectedReviews = reviews.filter(r => prepSelectedReviewIds.includes(r.id));
@@ -1103,11 +1194,62 @@ export default function PinkZone() {
     ];
 
     const result = parts.join('\n');
+    const nextTokens = currentTokens - MERGE_PROMPT_TOKEN_COST;
+
+    const { error: tokenUpdateError } = await supabase
+      .from('profiles')
+      .update({ tokens: nextTokens })
+      .eq('id', currentUserId);
+
+    if (tokenUpdateError) {
+      alert(
+        '토큰 차감에 실패했습니다.\n\n' +
+        'message: ' + (tokenUpdateError.message || '-') + '\n' +
+        'code: ' + (tokenUpdateError.code || '-') + '\n' +
+        'details: ' + (tokenUpdateError.details || '-') + '\n' +
+        'hint: ' + (tokenUpdateError.hint || '-')
+      );
+      return;
+    }
+
+    setUserProfile((prev) => ({
+      ...prev,
+      tokens: nextTokens,
+    }));
+
+    const { error: logError } = await supabase
+      .from('token_logs')
+      .insert({
+        user_id: currentUserId,
+        admin_id: null,
+        amount: -MERGE_PROMPT_TOKEN_COST,
+        balance_after: nextTokens,
+        type: 'use',
+        memo: '리뷰조합기 합쳐서 저장',
+      });
+
     setMergedPrompt(result);
-    alert('✅ 5번 테이블에 합쳐서 저장했습니다.');
+
+    if (logError) {
+      console.warn('token use log insert failed', logError);
+      alert(
+        `✅ 5번 테이블에 합쳐서 저장했습니다.\n` +
+        `토큰 ${MERGE_PROMPT_TOKEN_COST}개가 차감되었습니다.\n` +
+        `현재 보유 토큰: ${nextTokens.toLocaleString()}\n\n` +
+        '단, token_logs 기록 저장은 실패했습니다. token_logs RLS 정책을 확인해주세요.'
+      );
+      return;
+    }
+
+    alert(
+      `✅ 5번 테이블에 합쳐서 저장했습니다.\n` +
+      `토큰 ${MERGE_PROMPT_TOKEN_COST}개가 차감되었습니다.\n` +
+      `현재 보유 토큰: ${nextTokens.toLocaleString()}`
+    );
   };
 
   const copyMergedPrompt = async () => {
+    if (!canUseReviewGenerator) return alert('후기 생성 기능 권한이 없습니다.');
     if (!mergedPrompt.trim()) return alert('먼저 5번 테이블에 합쳐서 저장해주세요.');
 
     try {
@@ -1119,6 +1261,7 @@ export default function PinkZone() {
   };
 
   const downloadMergedPrompt = () => {
+    if (!canUseReviewGenerator) return alert('후기 생성 기능 권한이 없습니다.');
     if (!mergedPrompt.trim()) return alert('먼저 5번 테이블에 합쳐서 저장해주세요.');
 
     const fileNameBase = (targetSisterName.trim() || '후기생성요청서').replace(/[\\/:*?"<>|]/g, '_');
@@ -1783,6 +1926,17 @@ if (checkingAuth) {
               <p className="text-gray-600">
                 언니정보, 추가오더, 기존 후기를 필요한 만큼 선택하고 추가사항을 불러온 뒤 5번 테이블에서 하나의 프롬프트로 합쳐 저장하고 메모장 파일로 내려받는 화면입니다.
               </p>
+              {!canUseReviewGenerator && (
+                <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">
+                  현재 계정은 후기 생성 기능 권한이 없습니다. 관리자 페이지에서 이 회원의 「후기 생성」을 체크하면 조합 기능을 이용할 수 있습니다.
+                  <span className="mt-1 block text-xs font-semibold text-red-500">언니 데이터, 후기 데이터, 프롬프트 오더 저장 기능은 계속 이용할 수 있습니다.</span>
+                </div>
+              )}
+              {canUseReviewGenerator && userProfile.tokens < REVIEW_COMBINE_TOKEN_COST && (
+                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-bold text-amber-700">
+                  토큰이 부족합니다. 조합 기능을 이용하려면 최소 {REVIEW_COMBINE_TOKEN_COST}토큰이 필요합니다. 현재 보유 토큰은 {userProfile.tokens.toLocaleString()}개입니다.
+                </div>
+              )}
             </div>
 
             {/* 0번 테이블 */}
@@ -2160,13 +2314,25 @@ if (checkingAuth) {
                 </div>
 
                 <div className="flex gap-3">
-                  <button onClick={buildMergedPrompt} className="bg-orange-500 text-white px-6 py-3 rounded-2xl hover:bg-orange-600">
-                    합쳐서 저장
+                  <button
+                    onClick={buildMergedPrompt}
+                    disabled={!canUseReviewGenerator || userProfile.tokens < REVIEW_COMBINE_TOKEN_COST}
+                    className={`px-6 py-3 rounded-2xl text-white ${!canUseReviewGenerator || userProfile.tokens < REVIEW_COMBINE_TOKEN_COST ? 'bg-gray-300 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600'}`}
+                  >
+                    합쳐서 저장 (-50)
                   </button>
-                  <button onClick={copyMergedPrompt} className="border px-6 py-3 rounded-2xl hover:bg-gray-50">
+                  <button
+                    onClick={copyMergedPrompt}
+                    disabled={!canUseReviewGenerator}
+                    className={`border px-6 py-3 rounded-2xl ${!canUseReviewGenerator ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'hover:bg-gray-50'}`}
+                  >
                     복사
                   </button>
-                  <button onClick={downloadMergedPrompt} className="bg-pink-600 text-white px-6 py-3 rounded-2xl hover:bg-pink-700">
+                  <button
+                    onClick={downloadMergedPrompt}
+                    disabled={!canUseReviewGenerator}
+                    className={`px-6 py-3 rounded-2xl text-white ${!canUseReviewGenerator ? 'bg-gray-300 cursor-not-allowed' : 'bg-pink-600 hover:bg-pink-700'}`}
+                  >
                     메모장 다운로드
                   </button>
                 </div>

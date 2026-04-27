@@ -12,28 +12,27 @@ type Profile = {
   role_level?: number | null;
   tokens?: number | null;
   is_admin?: boolean | null;
+  can_generate_review?: boolean | null;
+  can_recommend_keyword?: boolean | null;
+  can_extra_order?: boolean | null;
+  can_generate_api?: boolean | null;
+  can_auto_save?: boolean | null;
   created_at?: string | null;
 };
 
 type FeatureKey =
-  | 'review_generator'
-  | 'keyword_helper'
-  | 'extra_order'
-  | 'api_generate'
-  | 'auto_save';
-
-type UserFeatureRow = {
-  user_id: string;
-  feature_key: FeatureKey | string;
-  enabled: boolean;
-};
+  | 'can_generate_review'
+  | 'can_recommend_keyword'
+  | 'can_extra_order'
+  | 'can_generate_api'
+  | 'can_auto_save';
 
 const FEATURES: { key: FeatureKey; label: string; desc: string }[] = [
-  { key: 'review_generator', label: '후기 생성', desc: '후기생성준비기/후기 생성 기능 사용' },
-  { key: 'keyword_helper', label: '키워드 추천', desc: '추후 키워드/문장 추천 기능' },
-  { key: 'extra_order', label: '추가오더', desc: '추가오더 프롬프트 관리 기능' },
-  { key: 'api_generate', label: 'API 생성', desc: 'GPT API 연동 생성 기능' },
-  { key: 'auto_save', label: '자동 저장', desc: '생성 결과 자동 저장 기능' },
+  { key: 'can_generate_review', label: '후기 생성', desc: '후기생성준비기/후기 생성 기능 사용' },
+  { key: 'can_recommend_keyword', label: '키워드 추천', desc: '추후 키워드/문장 추천 기능' },
+  { key: 'can_extra_order', label: '추가오더', desc: '추가오더 프롬프트 관리 기능' },
+  { key: 'can_generate_api', label: 'API 생성', desc: 'GPT/Grok API 캐스팅 생성 기능' },
+  { key: 'can_auto_save', label: '자동 저장', desc: '생성 결과 자동 저장 기능' },
 ];
 
 const ROLE_PRESETS = [
@@ -130,7 +129,7 @@ export default function AdminUsersPage() {
 
     if (error) {
       alert('회원 목록을 불러오지 못했습니다. Supabase RLS 정책 또는 profiles 컬럼을 확인해주세요.');
-      console.error(error);
+      console.warn(error);
       return;
     }
 
@@ -155,27 +154,15 @@ export default function AdminUsersPage() {
     setTokenAmount('');
     setTokenMemo('관리자 수동 충전/차감');
 
-    const baseFeatures = FEATURES.reduce<Record<string, boolean>>((acc, feature) => {
-      acc[feature.key] = false;
-      return acc;
-    }, {});
-
-    const { data, error } = await supabase
-      .from('user_features')
-      .select('user_id, feature_key, enabled')
-      .eq('user_id', profile.id);
-
-    if (error) {
-      console.error(error);
-      setFeatureState(baseFeatures);
-      return;
-    }
-
-    ((data || []) as UserFeatureRow[]).forEach((row) => {
-      baseFeatures[row.feature_key] = row.enabled;
+    // 기능 체크 상태는 user_features 테이블이 아니라 profiles의 boolean 컬럼에서 직접 읽습니다.
+    // 회원을 바꿀 때마다 선택한 회원의 값으로 새로 세팅해서 다른 회원 체크가 따라오는 문제를 막습니다.
+    setFeatureState({
+      can_generate_review: Boolean(profile.can_generate_review),
+      can_recommend_keyword: Boolean(profile.can_recommend_keyword),
+      can_extra_order: Boolean(profile.can_extra_order),
+      can_generate_api: Boolean(profile.can_generate_api),
+      can_auto_save: Boolean(profile.can_auto_save),
     });
-
-    setFeatureState(baseFeatures);
   };
 
   const filteredProfiles = useMemo(() => {
@@ -194,42 +181,49 @@ export default function AdminUsersPage() {
     setSaving(true);
 
     try {
+      const updatePayload = {
+        role_level: selectedRoleLevel,
+        tokens: selectedTokens,
+        is_admin: selectedIsAdmin,
+        can_generate_review: Boolean(featureState.can_generate_review),
+        can_recommend_keyword: Boolean(featureState.can_recommend_keyword),
+        can_extra_order: Boolean(featureState.can_extra_order),
+        can_generate_api: Boolean(featureState.can_generate_api),
+        can_auto_save: Boolean(featureState.can_auto_save),
+      };
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .update({
-          role_level: selectedRoleLevel,
-          tokens: selectedTokens,
-          is_admin: selectedIsAdmin,
-        })
+        .update(updatePayload)
         .eq('id', selectedUser.id);
 
       if (profileError) throw profileError;
 
-      const featureRows = FEATURES.map((feature) => ({
-        user_id: selectedUser.id,
-        feature_key: feature.key,
-        enabled: Boolean(featureState[feature.key]),
-      }));
-
-      const { error: featureError } = await supabase
-        .from('user_features')
-        .upsert(featureRows, { onConflict: 'user_id,feature_key' });
-
-      if (featureError) throw featureError;
-
       alert('회원 권한이 저장되었습니다.');
       await loadProfiles();
 
-      const refreshedUser = {
+      const refreshedUser: Profile = {
         ...selectedUser,
         role_level: selectedRoleLevel,
         tokens: selectedTokens,
         is_admin: selectedIsAdmin,
+        can_generate_review: Boolean(featureState.can_generate_review),
+        can_recommend_keyword: Boolean(featureState.can_recommend_keyword),
+        can_extra_order: Boolean(featureState.can_extra_order),
+        can_generate_api: Boolean(featureState.can_generate_api),
+        can_auto_save: Boolean(featureState.can_auto_save),
       };
       setSelectedUser(refreshedUser);
-    } catch (error) {
-      console.error(error);
-      alert('저장 중 오류가 발생했습니다. Supabase 정책 또는 테이블 구조를 확인해주세요.');
+      setProfiles((prev) => prev.map((profile) => (profile.id === refreshedUser.id ? refreshedUser : profile)));
+    } catch (error: any) {
+      console.warn('saveUserSettings error', error);
+      alert(
+        '저장 중 오류가 발생했습니다.\n\n' +
+          'message: ' + (error?.message || '-') + '\n' +
+          'code: ' + (error?.code || '-') + '\n' +
+          'details: ' + (error?.details || '-') + '\n' +
+          'hint: ' + (error?.hint || '-')
+      );
     } finally {
       setSaving(false);
     }
@@ -248,41 +242,77 @@ export default function AdminUsersPage() {
     const nextTokens = selectedTokens + amount;
 
     if (nextTokens < 0) {
-      alert('보유 토큰보다 많이 차감할 수 없습니다.');
+      alert('보유액보다 많이 차감할 수 없습니다.');
       return;
     }
 
     setSaving(true);
 
     try {
+      // 실제 보유 토큰은 profiles.tokens에 먼저 반영합니다.
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ tokens: nextTokens })
         .eq('id', selectedUser.id);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        alert(
+          '토큰 반영 실패\n\n' +
+            'message: ' + (updateError.message || '-') + '\n' +
+            'code: ' + (updateError.code || '-') + '\n' +
+            'details: ' + (updateError.details || '-') + '\n' +
+            'hint: ' + (updateError.hint || '-')
+        );
+        return;
+      }
 
+      // token_logs는 부가 기록입니다.
+      // token_logs 테이블/RLS가 아직 완성되지 않아도 실제 토큰 반영 성공을 오류로 처리하지 않습니다.
       const logType = amount > 0 ? 'charge' : 'adjust';
       const { error: logError } = await supabase.from('token_logs').insert({
         user_id: selectedUser.id,
+        admin_id: adminProfile?.id || null,
         amount,
+        balance_after: nextTokens,
         type: logType,
         memo: tokenMemo || '관리자 수동 충전/차감',
       });
 
-      if (logError) throw logError;
+      if (logError) {
+        console.warn('token_logs insert skipped:', logError);
+      }
 
+      const refreshedUser: Profile = {
+        ...selectedUser,
+        tokens: nextTokens,
+      };
+
+      setSelectedUser(refreshedUser);
       setSelectedTokens(nextTokens);
       setTokenAmount('');
-      alert('토큰이 반영되었습니다.');
+      setProfiles((prev) => prev.map((profile) => (profile.id === selectedUser.id ? refreshedUser : profile)));
+
+      if (logError) {
+        alert('토큰은 반영되었습니다.\n단, token_logs 기록은 아직 저장되지 않았습니다.');
+      } else {
+        alert('토큰이 반영되었습니다.');
+      }
+
       await loadProfiles();
-    } catch (error) {
-      console.error(error);
-      alert('토큰 처리 중 오류가 발생했습니다.');
+    } catch (error: any) {
+      console.warn('applyTokenChange error', error);
+      alert(
+        '토큰 처리 중 오류가 발생했습니다.\n\n' +
+          'message: ' + (error?.message || '-') + '\n' +
+          'code: ' + (error?.code || '-') + '\n' +
+          'details: ' + (error?.details || '-') + '\n' +
+          'hint: ' + (error?.hint || '-')
+      );
     } finally {
       setSaving(false);
     }
   };
+
 
   if (loading) {
     return (
@@ -323,13 +353,21 @@ export default function AdminUsersPage() {
               <p className="mt-1 text-xs text-gray-400">관리자: {getDisplayName(adminProfile)}</p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => router.push('/dashboard')}
-            className="rounded-xl border border-[#f3b2d0] bg-white px-4 py-2 text-sm font-bold text-[#e4348a] hover:bg-[#fff0f7]"
-          >
-            대시보드
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/dashboard/admin/token-logs"
+              className="inline-flex items-center justify-center rounded-xl bg-[#e4348a] px-4 py-2 text-sm font-bold text-white hover:bg-[#cc1f78]"
+            >
+              토큰 지급 내역
+            </a>
+            <button
+              type="button"
+              onClick={() => router.push('/dashboard')}
+              className="rounded-xl border border-[#f3b2d0] bg-white px-4 py-2 text-sm font-bold text-[#e4348a] hover:bg-[#fff0f7]"
+            >
+              대시보드
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[380px_1fr]">
