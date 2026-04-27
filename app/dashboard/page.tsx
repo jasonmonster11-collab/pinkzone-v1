@@ -1150,6 +1150,17 @@ export default function PinkZone() {
       return;
     }
 
+    const confirmUseToken = window.confirm(
+      `${MERGE_PROMPT_TOKEN_COST} 토큰이 소모됩니다.\n\n` +
+      `현재 보유 토큰: ${currentTokens.toLocaleString()}\n` +
+      `사용 후 보유 토큰: ${(currentTokens - MERGE_PROMPT_TOKEN_COST).toLocaleString()}\n\n` +
+      '정말 진행하시겠습니까?'
+    );
+
+    if (!confirmUseToken) {
+      return;
+    }
+
     const selectedSister = sisters.find(s => s.id === prepSelectedSisterId);
     const selectedExtraOrders = extraOrders.filter(o => prepSelectedExtraOrderIds.includes(o.id));
     const selectedReviews = reviews.filter(r => prepSelectedReviewIds.includes(r.id));
