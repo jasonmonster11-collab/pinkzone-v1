@@ -29,6 +29,22 @@ type ExtraOrder = {
   date: string;
 };
 
+type BoardType = 'notice' | 'qna';
+
+type BoardPost = {
+  id: string;
+  boardType: BoardType;
+  title: string;
+  content: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  isSecret: boolean;
+  answer?: string | null;
+  answerUserEmail?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
 type UserProfile = {
   roleLevel: number;
   tokens: number;
@@ -50,11 +66,35 @@ export default function PinkZone() {
   });
   const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [activeMenu, setActiveMenu] = useState('후기생성준비기');
+  const [activeMenu, setActiveMenu] = useState('HOME');
+  const [reviewMenuOpen, setReviewMenuOpen] = useState(false);
+
+  const mainMenus = [
+    { id: 'HOME', label: 'HOME' },
+    { id: '공지사항', label: '공지사항' },
+    { id: 'Q&A', label: 'Q&A' },
+  ];
+
+  const reviewMenus = [
+    { id: '후기생성준비기', label: '리뷰조합기' },
+    { id: '언니정보 검색/저장', label: '언니 데이터' },
+    { id: '언니후기 검색/저장', label: '언니후기 데이터' },
+    { id: '추가오더 등록/수정', label: '프롬프트 오더' },
+  ];
+
+  const isReviewMenuActive = reviewMenus.some((m) => m.id === activeMenu);
 
   const [sisters, setSisters] = useState<Sister[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [extraOrders, setExtraOrders] = useState<ExtraOrder[]>([]);
+  const [boardPosts, setBoardPosts] = useState<BoardPost[]>([]);
+
+  // 게시판
+  const [boardSearch, setBoardSearch] = useState('');
+  const [boardForm, setBoardForm] = useState({ title: '', content: '', isSecret: false });
+  const [editingBoardPost, setEditingBoardPost] = useState<BoardPost | null>(null);
+  const [viewingBoardPost, setViewingBoardPost] = useState<BoardPost | null>(null);
+  const [boardAnswerText, setBoardAnswerText] = useState('');
 
   // 언니정보 모달
   const [showSisterModal, setShowSisterModal] = useState(false);
@@ -114,13 +154,13 @@ export default function PinkZone() {
         ]);
         setCheckingAuth(false);
       } catch (error) {
-        console.error('Auth check failed:', error);
+        // Refresh Token 오류가 개발 오버레이로 뜨지 않도록 조용히 세션을 정리합니다.
 
         // Supabase refresh token이 만료/초기화되었을 때 남아있는 로컬 세션 정리
         try {
           await supabase.auth.signOut({ scope: 'local' });
         } catch (signOutError) {
-          console.error('Local sign out failed:', signOutError);
+          void signOutError;
         }
 
         if (typeof window !== 'undefined') {
@@ -145,7 +185,7 @@ export default function PinkZone() {
       .single();
 
     if (error) {
-      console.error('Profile load failed:', error);
+      console.warn('Profile load failed:', error);
       setUserProfile({ roleLevel: 5, tokens: 0, isAdmin: false });
       return;
     }
@@ -177,8 +217,21 @@ export default function PinkZone() {
 
   const todayText = () => new Date().toISOString().split('T')[0];
 
+  const getSupabaseErrorMessage = (error: any) => {
+    if (!error) return '알 수 없는 오류';
+    const parts = [error.message, error.details, error.hint, error.code].filter(Boolean);
+    if (parts.length) return parts.join(' / ');
+    try {
+      const json = JSON.stringify(error);
+      return json && json !== '{}' ? json : 'Supabase 권한 또는 테이블 구조를 확인해주세요.';
+    } catch {
+      return String(error);
+    }
+  };
+
+
   const loadAllData = async (currentUserId: string) => {
-    const [sistersResult, reviewsResult, extraOrdersResult] = await Promise.all([
+    const [sistersResult, reviewsResult, extraOrdersResult, boardsResult] = await Promise.all([
       supabase
         .from('sisters')
         .select('id, name, category, spec, memo, created_at')
@@ -196,15 +249,20 @@ export default function PinkZone() {
         .eq('user_id', currentUserId)
         .order('order_date', { ascending: false })
         .order('created_at', { ascending: false }),
+      supabase
+        .from('boards')
+        .select('id, board_type, title, content, user_id, user_email, is_secret, answer, answer_user_email, created_at, updated_at')
+        .order('created_at', { ascending: false }),
     ]);
 
-    if (sistersResult.error || reviewsResult.error || extraOrdersResult.error) {
-      console.error({
+    if (sistersResult.error || reviewsResult.error || extraOrdersResult.error || boardsResult.error) {
+      console.warn({
         sistersError: sistersResult.error,
         reviewsError: reviewsResult.error,
         extraOrdersError: extraOrdersResult.error,
+        boardsError: boardsResult.error,
       });
-      alert('DB 데이터를 불러오지 못했습니다. Supabase 테이블과 RLS 정책을 먼저 확인해주세요.');
+      alert('DB 데이터를 불러오지 못했습니다. Supabase 테이블/RLS 정책을 확인해주세요.\n\n' + getSupabaseErrorMessage(sistersResult.error || reviewsResult.error || extraOrdersResult.error || boardsResult.error));
       return;
     }
 
@@ -231,6 +289,20 @@ export default function PinkZone() {
       prompt: row.prompt,
       memo: row.memo || '',
       date: row.order_date,
+    })));
+
+    setBoardPosts((boardsResult.data || []).map((row) => ({
+      id: row.id,
+      boardType: (row.board_type === 'qna' ? 'qna' : 'notice') as BoardType,
+      title: row.title,
+      content: row.content,
+      userId: row.user_id || null,
+      userEmail: row.user_email || null,
+      isSecret: Boolean(row.is_secret),
+      answer: row.answer || '',
+      answerUserEmail: row.answer_user_email || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at || null,
     })));
   };
 
@@ -362,7 +434,7 @@ export default function PinkZone() {
       }
 
       if (errors.length > 0) {
-        console.error(errors);
+        console.warn(errors);
         alert(`백업 복구 중 오류가 발생했습니다.\n\n${errors.join('\n')}`);
         return;
       }
@@ -370,7 +442,7 @@ export default function PinkZone() {
       await loadAllData(currentUserId);
       alert(`✅ 백업 복구 완료!\n\n언니정보 ${sisterRows.length}개\n후기 ${reviewRows.length}개\n추가오더 ${extraOrderRows.length}개`);
     } catch (error) {
-      console.error(error);
+      console.warn(error);
       alert('백업 파일을 읽지 못했습니다. JSON 파일 형식을 확인해주세요.');
     } finally {
       event.target.value = '';
@@ -462,7 +534,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('언니정보 수정 실패');
         return;
       }
@@ -488,7 +560,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('언니정보 등록 실패');
         return;
       }
@@ -522,7 +594,7 @@ export default function PinkZone() {
       .eq('user_id', currentUserId);
 
     if (error) {
-      console.error(error);
+      console.warn(error);
       alert('언니정보 삭제 실패');
       return;
     }
@@ -564,7 +636,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('후기 수정 실패');
         return;
       }
@@ -596,7 +668,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('후기 저장 실패');
         return;
       }
@@ -631,7 +703,7 @@ export default function PinkZone() {
       .eq('user_id', currentUserId);
 
     if (error) {
-      console.error(error);
+      console.warn(error);
       alert('후기 삭제 실패');
       return;
     }
@@ -675,7 +747,7 @@ export default function PinkZone() {
       .eq('user_id', currentUserId);
 
     if (error) {
-      console.error(error);
+      console.warn(error);
       alert('선택 후기 삭제 실패');
       return;
     }
@@ -825,7 +897,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('추가오더 수정 실패');
         return;
       }
@@ -855,7 +927,7 @@ export default function PinkZone() {
         .single();
 
       if (error) {
-        console.error(error);
+        console.warn(error);
         alert('추가오더 저장 실패');
         return;
       }
@@ -902,7 +974,7 @@ export default function PinkZone() {
       .eq('user_id', currentUserId);
 
     if (error) {
-      console.error(error);
+      console.warn(error);
       alert('추가오더 삭제 실패');
       return;
     }
@@ -1065,6 +1137,219 @@ export default function PinkZone() {
 
 
   // ==================== 메뉴 이동 시 작업중 내용 초기화 ====================
+
+  const formatBoardDate = (dateText: string) => {
+    if (!dateText) return '-';
+    const date = new Date(dateText);
+    if (Number.isNaN(date.getTime())) return dateText.slice(0, 10);
+    return date.toISOString().slice(0, 10);
+  };
+
+  const getBoardLabel = (boardType: BoardType) => boardType === 'notice' ? '공지사항' : 'Q&A';
+  const currentBoardType = activeMenu === 'Q&A' ? 'qna' : 'notice';
+  const latestNoticePosts = boardPosts.filter(post => post.boardType === 'notice').slice(0, 5);
+  const latestQnaPosts = boardPosts.filter(post => post.boardType === 'qna').slice(0, 5);
+
+  const canWriteCurrentBoard = (boardType: BoardType) => boardType === 'qna' || userProfile.isAdmin;
+  const canManageBoardPost = (post: BoardPost) => userProfile.isAdmin || post.userId === userId;
+  const canViewBoardPost = (post: BoardPost) => !post.isSecret || userProfile.isAdmin || post.userId === userId;
+
+  const filteredBoardPosts = boardPosts
+    .filter(post => post.boardType === currentBoardType)
+    .filter(post => {
+      const keyword = boardSearch.trim().toLowerCase();
+      if (!keyword) return true;
+      return (
+        post.title.toLowerCase().includes(keyword) ||
+        post.content.toLowerCase().includes(keyword) ||
+        (post.userEmail || '').toLowerCase().includes(keyword)
+      );
+    });
+
+  const resetBoardForm = () => {
+    setBoardForm({ title: '', content: '', isSecret: false });
+    setEditingBoardPost(null);
+  };
+
+  const openBoardPost = (post: BoardPost) => {
+    if (!canViewBoardPost(post)) {
+      alert('비밀글은 작성자와 관리자만 확인할 수 있습니다.');
+      return;
+    }
+    setViewingBoardPost(post);
+    setBoardAnswerText(post.answer || '');
+  };
+
+  const startEditBoardPost = (post: BoardPost) => {
+    if (!canManageBoardPost(post)) {
+      alert('본인 글 또는 관리자만 수정할 수 있습니다.');
+      return;
+    }
+    setEditingBoardPost(post);
+    setBoardForm({ title: post.title, content: post.content, isSecret: post.isSecret });
+    setViewingBoardPost(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const saveBoardPost = async () => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
+    const boardType = currentBoardType;
+    if (!canWriteCurrentBoard(boardType)) {
+      alert('공지사항은 관리자만 작성할 수 있습니다.');
+      return;
+    }
+
+    if (!boardForm.title.trim() || !boardForm.content.trim()) {
+      alert('제목과 내용을 입력해주세요.');
+      return;
+    }
+
+    if (editingBoardPost) {
+      const { data, error } = await supabase
+        .from('boards')
+        .update({
+          title: boardForm.title.trim(),
+          content: boardForm.content.trim(),
+          is_secret: boardType === 'qna' ? boardForm.isSecret : false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingBoardPost.id)
+        .select('id, board_type, title, content, user_id, user_email, is_secret, answer, answer_user_email, created_at, updated_at')
+        .single();
+
+      if (error) {
+        console.warn(error);
+        alert('게시글 수정 실패\n\n' + getSupabaseErrorMessage(error));
+        return;
+      }
+
+      const updatedPost: BoardPost = {
+        id: data.id,
+        boardType: (data.board_type === 'qna' ? 'qna' : 'notice') as BoardType,
+        title: data.title,
+        content: data.content,
+        userId: data.user_id || null,
+        userEmail: data.user_email || null,
+        isSecret: Boolean(data.is_secret),
+        answer: data.answer || '',
+        answerUserEmail: data.answer_user_email || '',
+        createdAt: data.created_at,
+        updatedAt: data.updated_at || null,
+      };
+
+      setBoardPosts(prev => prev.map(post => post.id === updatedPost.id ? updatedPost : post));
+      resetBoardForm();
+      alert('✅ 게시글 수정 완료!');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('boards')
+      .insert({
+        board_type: boardType,
+        title: boardForm.title.trim(),
+        content: boardForm.content.trim(),
+        user_id: currentUserId,
+        user_email: userEmail,
+        is_secret: boardType === 'qna' ? boardForm.isSecret : false,
+      })
+      .select('id, board_type, title, content, user_id, user_email, is_secret, answer, answer_user_email, created_at, updated_at')
+      .single();
+
+    if (error) {
+      console.warn(error);
+      alert('게시글 등록 실패\n\n' + getSupabaseErrorMessage(error));
+      return;
+    }
+
+    const newPost: BoardPost = {
+      id: data.id,
+      boardType: (data.board_type === 'qna' ? 'qna' : 'notice') as BoardType,
+      title: data.title,
+      content: data.content,
+      userId: data.user_id || null,
+      userEmail: data.user_email || null,
+      isSecret: Boolean(data.is_secret),
+      answer: data.answer || '',
+      answerUserEmail: data.answer_user_email || '',
+      createdAt: data.created_at,
+      updatedAt: data.updated_at || null,
+    };
+
+    setBoardPosts(prev => [newPost, ...prev]);
+    resetBoardForm();
+    alert('✅ 게시글 등록 완료!');
+  };
+
+  const deleteBoardPost = async (post: BoardPost) => {
+    const currentUserId = requireUserId();
+    if (!currentUserId) return;
+
+    if (!canManageBoardPost(post)) {
+      alert('본인 글 또는 관리자만 삭제할 수 있습니다.');
+      return;
+    }
+
+    if (!confirm('정말 이 게시글을 삭제하시겠습니까?')) return;
+
+    const { error } = await supabase
+      .from('boards')
+      .delete()
+      .eq('id', post.id);
+
+    if (error) {
+      console.warn(error);
+      alert('게시글 삭제 실패\n\n' + getSupabaseErrorMessage(error));
+      return;
+    }
+
+    setBoardPosts(prev => prev.filter(item => item.id !== post.id));
+    if (viewingBoardPost?.id === post.id) setViewingBoardPost(null);
+    resetBoardForm();
+    alert('✅ 삭제 완료!');
+  };
+
+  const saveBoardAnswer = async (post: BoardPost) => {
+    if (!userProfile.isAdmin) return;
+
+    const { data, error } = await supabase
+      .from('boards')
+      .update({
+        answer: boardAnswerText.trim(),
+        answer_user_email: userEmail,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', post.id)
+      .select('id, board_type, title, content, user_id, user_email, is_secret, answer, answer_user_email, created_at, updated_at')
+      .single();
+
+    if (error) {
+      console.warn(error);
+      alert('답변 저장 실패\n\n' + getSupabaseErrorMessage(error));
+      return;
+    }
+
+    const updatedPost: BoardPost = {
+      id: data.id,
+      boardType: (data.board_type === 'qna' ? 'qna' : 'notice') as BoardType,
+      title: data.title,
+      content: data.content,
+      userId: data.user_id || null,
+      userEmail: data.user_email || null,
+      isSecret: Boolean(data.is_secret),
+      answer: data.answer || '',
+      answerUserEmail: data.answer_user_email || '',
+      createdAt: data.created_at,
+      updatedAt: data.updated_at || null,
+    };
+
+    setBoardPosts(prev => prev.map(item => item.id === updatedPost.id ? updatedPost : item));
+    setViewingBoardPost(updatedPost);
+    alert('✅ 답변 저장 완료!');
+  };
+
   const resetWorkingState = () => {
     // 언니정보 작성/수정 중이던 임시값
     setShowSisterModal(false);
@@ -1103,9 +1388,16 @@ export default function PinkZone() {
     setPrepAdditionalNote('');
     setMergedPrompt('');
     setViewingPrepReview(null);
+
+    // 게시판 임시값
+    setBoardSearch('');
+    resetBoardForm();
+    setViewingBoardPost(null);
+    setBoardAnswerText('');
   };
 
   const changeMenu = (menuId: string) => {
+    setReviewMenuOpen(false);
     if (menuId === activeMenu) return;
     resetWorkingState();
     setActiveMenu(menuId);
@@ -1130,32 +1422,62 @@ if (checkingAuth) {
       {/* 헤더 */}
       <header className="bg-white shadow-sm border-b sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-5 py-2 flex items-center gap-4 flex-nowrap">
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="w-9 h-9 bg-gradient-to-br from-pink-500 to-purple-600 rounded-xl flex items-center justify-center text-2xl">💖</div>
+          <button
+            type="button"
+            onClick={() => changeMenu('HOME')}
+            className="flex items-center gap-3 shrink-0 rounded-2xl px-2 py-1 text-left transition-all hover:bg-pink-50"
+            title="HOME으로 이동"
+          >
+            <div className="w-9 h-9 bg-gradient-to-br from-pink-500 to-purple-600 rounded-xl flex items-center justify-center text-2xl shadow-sm">💖</div>
             <div>
               <h1 className="text-2xl font-bold leading-tight">핑크 존</h1>
               <p className="text-[11px] text-gray-600 -mt-1">작가작성 템플릿</p>
             </div>
-          </div>
+          </button>
 
-          <div className="flex gap-2 flex-nowrap flex-1 items-center overflow-x-auto">
-            {[
-              { id: '후기생성준비기', label: '후기생성준비기' },
-              { id: '언니정보 검색/저장', label: '언니정보 검색/저장' },
-              { id: '언니후기 검색/저장', label: '언니후기 검색/저장' },
-              { id: '추가오더 등록/수정', label: '추가오더 등록/수정' },
-            ].map((m) => (
+          <nav className="flex gap-2 flex-nowrap flex-1 items-center overflow-visible">
+            {mainMenus.map((m) => (
               <button
                 key={m.id}
+                type="button"
                 onClick={() => changeMenu(m.id)}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-                  activeMenu === m.id ? 'bg-orange-500 text-white shadow-md' : 'bg-white border hover:bg-orange-50'
+                className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+                  activeMenu === m.id ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-pink-50 border border-pink-100 hover:bg-pink-100'
                 }`}
               >
                 {m.label}
               </button>
             ))}
-          </div>
+
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setReviewMenuOpen((v) => !v)}
+                className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
+                  isReviewMenuActive ? 'bg-pink-600 text-white shadow-sm' : 'bg-pink-50 border border-pink-100 hover:bg-pink-100'
+                }`}
+              >
+                후기 메뉴 ▾
+              </button>
+
+              {reviewMenuOpen && (
+                <div className="absolute left-0 top-[42px] z-[70] w-52 overflow-hidden rounded-2xl border border-pink-100 bg-white p-2 shadow-xl">
+                  {reviewMenus.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => changeMenu(m.id)}
+                      className={`block w-full rounded-xl px-4 py-3 text-left text-sm font-bold transition-all ${
+                        activeMenu === m.id ? 'bg-pink-600 text-white' : 'text-gray-800 hover:bg-pink-50 hover:text-pink-700'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </nav>
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <div className="text-right hidden lg:block">
@@ -1206,7 +1528,253 @@ if (checkingAuth) {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-10">
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* HOME */}
+        {activeMenu === 'HOME' && (
+          <div className="mx-auto max-w-5xl space-y-6">
+            <section className="rounded-2xl bg-white p-8 shadow-sm">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+                {[
+                  { title: '리뷰조합기 이용방법', desc: '선택한 데이터를 조합합니다.', menu: '후기생성준비기' },
+                  { title: '언니 데이터', desc: '언니의 개인 정보를 기입한다', menu: '언니정보 검색/저장' },
+                  { title: '언니후기 데이터', desc: '언니개개인의 후기를 저장한다', menu: '언니후기 검색/저장' },
+                  { title: '프롬프트 오더', desc: '후기를 뽑을 때 필요한 요소를 넣어준다', menu: '추가오더 등록/수정' },
+                  { title: '리뷰 조합기', desc: '저장된 데이터를 불러와 조합한다', menu: '후기생성준비기' },
+                ].map((card) => (
+                  <button
+                    key={card.title}
+                    type="button"
+                    onClick={() => changeMenu(card.menu)}
+                    className="min-h-[92px] rounded-none border border-gray-300 bg-white px-3 py-4 text-center transition hover:-translate-y-0.5 hover:border-pink-400 hover:bg-pink-50"
+                  >
+                    <div className="text-sm font-extrabold text-gray-900">{card.title}</div>
+                    <div className="mt-2 text-xs font-semibold leading-5 text-gray-600">{card.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white p-7 shadow-sm">
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold text-gray-900">공지사항</div>
+                    <button type="button" onClick={() => changeMenu('공지사항')} className="text-xs font-bold text-pink-600 hover:underline">더보기</button>
+                  </div>
+                  <div className="min-h-[118px] rounded-xl bg-gray-50 p-3">
+                    {latestNoticePosts.length === 0 ? (
+                      <div className="flex h-[92px] items-center justify-center text-sm font-bold text-gray-500">등록된 공지사항이 없습니다.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {latestNoticePosts.map((post) => (
+                          <button key={post.id} type="button" onClick={() => openBoardPost(post)} className="flex w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm hover:bg-pink-50">
+                            <span className="truncate font-bold text-gray-800">{post.title}</span>
+                            <span className="shrink-0 text-xs font-semibold text-gray-400">{formatBoardDate(post.createdAt)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold text-gray-900">Q&amp;A</div>
+                    <button type="button" onClick={() => changeMenu('Q&A')} className="text-xs font-bold text-pink-600 hover:underline">더보기</button>
+                  </div>
+                  <div className="min-h-[118px] rounded-xl bg-gray-50 p-3">
+                    {latestQnaPosts.length === 0 ? (
+                      <div className="flex h-[92px] items-center justify-center text-sm font-bold text-gray-500">등록된 Q&amp;A가 없습니다.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {latestQnaPosts.map((post) => (
+                          <button key={post.id} type="button" onClick={() => openBoardPost(post)} className="flex w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-left text-sm hover:bg-pink-50">
+                            <span className="min-w-0 flex-1 truncate font-bold text-gray-800">{post.isSecret ? '🔒 ' : ''}{post.title}</span>
+                            {post.answer ? <span className="shrink-0 rounded-full bg-pink-100 px-2 py-1 text-[11px] font-black text-pink-700">답변완료</span> : <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-500">대기</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white p-8 shadow-sm">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-extrabold text-gray-900">핑크존 대시보드</h2>
+                  <p className="mt-1 text-sm font-semibold text-gray-500">저장된 데이터와 주요 메뉴를 한눈에 확인합니다.</p>
+                </div>
+                <div className="rounded-full bg-pink-600 px-4 py-2 text-xs font-extrabold text-white">최신패치 4/27</div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div className="rounded-2xl border border-pink-100 bg-pink-50 p-5 text-center">
+                  <div className="text-xs font-bold text-gray-500">저장된 언니 데이터</div>
+                  <div className="mt-2 text-3xl font-black text-pink-600">{sisters.length}</div>
+                </div>
+                <div className="rounded-2xl border border-pink-100 bg-pink-50 p-5 text-center">
+                  <div className="text-xs font-bold text-gray-500">저장된 후기 데이터</div>
+                  <div className="mt-2 text-3xl font-black text-pink-600">{reviews.length}</div>
+                </div>
+                <div className="rounded-2xl border border-pink-100 bg-pink-50 p-5 text-center">
+                  <div className="text-xs font-bold text-gray-500">프롬프트 오더</div>
+                  <div className="mt-2 text-3xl font-black text-pink-600">{extraOrders.length}</div>
+                </div>
+                <div className="rounded-2xl border border-pink-100 bg-pink-50 p-5 text-center">
+                  <div className="text-xs font-bold text-gray-500">내 등급</div>
+                  <div className="mt-3 text-sm font-black text-pink-600">{getRoleLabel(userProfile.roleLevel)}</div>
+                </div>
+              </div>
+
+              <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-gray-100 p-5">
+                  <div className="mb-3 text-sm font-extrabold">최근 저장된 후기</div>
+                  {reviews.slice(0, 4).length === 0 ? (
+                    <div className="rounded-xl bg-gray-50 px-4 py-6 text-center text-sm font-semibold text-gray-500">아직 저장된 후기가 없습니다.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {reviews.slice(0, 4).map((review) => (
+                        <div key={review.id} className="rounded-xl bg-gray-50 px-4 py-3 text-sm">
+                          <span className="font-extrabold text-pink-700">{review.sisterName}</span>
+                          <span className="mx-2 text-gray-300">|</span>
+                          <span className="font-semibold text-gray-700">{review.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-100 p-5">
+                  <div className="mb-3 text-sm font-extrabold">빠른 이동</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => changeMenu('후기생성준비기')} className="rounded-xl bg-pink-600 px-4 py-3 text-sm font-extrabold text-white hover:bg-pink-700">리뷰조합기</button>
+                    <button type="button" onClick={() => changeMenu('언니정보 검색/저장')} className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm font-extrabold text-pink-700 hover:bg-pink-50">언니 데이터</button>
+                    <button type="button" onClick={() => changeMenu('언니후기 검색/저장')} className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm font-extrabold text-pink-700 hover:bg-pink-50">후기 데이터</button>
+                    <button type="button" onClick={() => changeMenu('추가오더 등록/수정')} className="rounded-xl border border-pink-200 bg-white px-4 py-3 text-sm font-extrabold text-pink-700 hover:bg-pink-50">오더 등록</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* 게시판 */}
+        {(activeMenu === '공지사항' || activeMenu === 'Q&A') && (
+          <div className="mx-auto max-w-5xl space-y-6">
+            <section className="rounded-3xl bg-white p-8 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-3xl font-black text-gray-900">{getBoardLabel(currentBoardType)}</h2>
+                  <p className="mt-2 text-sm font-semibold text-gray-500">
+                    {currentBoardType === 'notice'
+                      ? '운영자가 업데이트와 안내사항을 등록하는 공간입니다.'
+                      : '사용자가 질문을 남기고 관리자가 답변하는 공간입니다.'}
+                  </p>
+                </div>
+                <button type="button" onClick={() => changeMenu('HOME')} className="rounded-xl border border-pink-200 bg-white px-5 py-3 text-sm font-extrabold text-pink-700 hover:bg-pink-50">
+                  HOME으로
+                </button>
+              </div>
+            </section>
+
+            {canWriteCurrentBoard(currentBoardType) ? (
+              <section className="rounded-3xl bg-white p-8 shadow-sm">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <h3 className="text-xl font-black">{editingBoardPost ? '게시글 수정' : `${getBoardLabel(currentBoardType)} 글쓰기`}</h3>
+                  {editingBoardPost && (
+                    <button type="button" onClick={resetBoardForm} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-gray-50">수정 취소</button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={boardForm.title}
+                  onChange={e => setBoardForm({ ...boardForm, title: e.target.value })}
+                  placeholder="제목을 입력하세요"
+                  className="mb-4 w-full rounded-2xl border px-5 py-4 text-base font-semibold"
+                />
+                <textarea
+                  value={boardForm.content}
+                  onChange={e => setBoardForm({ ...boardForm, content: e.target.value })}
+                  placeholder="내용을 입력하세요"
+                  className="h-44 w-full rounded-2xl border px-5 py-4 leading-7"
+                />
+                {currentBoardType === 'qna' && (
+                  <label className="mt-4 flex items-center gap-2 text-sm font-bold text-gray-700">
+                    <input type="checkbox" checked={boardForm.isSecret} onChange={e => setBoardForm({ ...boardForm, isSecret: e.target.checked })} className="h-4 w-4" />
+                    비밀글로 등록
+                  </label>
+                )}
+                <div className="mt-5 flex justify-end">
+                  <button type="button" onClick={saveBoardPost} className="rounded-2xl bg-pink-600 px-7 py-3 text-sm font-black text-white hover:bg-pink-700">
+                    {editingBoardPost ? '수정 저장' : '등록하기'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-2xl border border-pink-100 bg-white p-5 text-center text-sm font-bold text-gray-500 shadow-sm">
+                공지사항은 관리자만 작성할 수 있습니다.
+              </section>
+            )}
+
+            <section className="rounded-3xl bg-white p-8 shadow-sm">
+              <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <h3 className="text-xl font-black">게시글 목록 ({filteredBoardPosts.length}개)</h3>
+                <input
+                  type="text"
+                  value={boardSearch}
+                  onChange={e => setBoardSearch(e.target.value)}
+                  placeholder="제목/내용/작성자 검색"
+                  className="w-full rounded-2xl border px-5 py-3 md:w-80"
+                />
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border">
+                <table className="w-full text-left">
+                  <thead className="bg-pink-50">
+                    <tr>
+                      <th className="w-28 p-4">상태</th>
+                      <th className="p-4">제목</th>
+                      <th className="w-48 p-4">작성자</th>
+                      <th className="w-32 p-4">날짜</th>
+                      <th className="w-32 p-4 text-center">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredBoardPosts.length === 0 && (
+                      <tr><td colSpan={5} className="p-8 text-center text-sm font-semibold text-gray-500">게시글이 없습니다.</td></tr>
+                    )}
+                    {filteredBoardPosts.map(post => (
+                      <tr key={post.id} className="border-t hover:bg-pink-50/40">
+                        <td className="p-4">
+                          {post.boardType === 'qna'
+                            ? (post.answer ? <span className="rounded-full bg-pink-100 px-3 py-1 text-xs font-black text-pink-700">답변완료</span> : <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-500">대기</span>)
+                            : <span className="rounded-full bg-pink-600 px-3 py-1 text-xs font-black text-white">공지</span>}
+                        </td>
+                        <td className="p-4">
+                          <button type="button" onClick={() => openBoardPost(post)} className="max-w-[520px] truncate text-left font-extrabold text-gray-800 hover:text-pink-600 hover:underline">
+                            {post.isSecret ? '🔒 ' : ''}{!canViewBoardPost(post) ? '비밀글입니다.' : post.title}
+                          </button>
+                        </td>
+                        <td className="p-4 text-sm font-semibold text-gray-500">{post.userEmail || '-'}</td>
+                        <td className="p-4 text-sm font-semibold text-gray-500">{formatBoardDate(post.createdAt)}</td>
+                        <td className="p-4 text-center">
+                          {canManageBoardPost(post) ? (
+                            <div className="flex justify-center gap-3 text-sm font-bold">
+                              <button type="button" onClick={() => startEditBoardPost(post)} className="text-blue-600 hover:underline">수정</button>
+                              <button type="button" onClick={() => deleteBoardPost(post)} className="text-red-600 hover:underline">삭제</button>
+                            </div>
+                          ) : <span className="text-xs text-gray-300">-</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        )}
+
         {/* 후기생성준비기 */}
         {activeMenu === '후기생성준비기' && (
           <div className="space-y-8">
@@ -2038,6 +2606,55 @@ if (checkingAuth) {
           </div>
         )}
       </div>
+
+      {/* 게시글 보기 */}
+      {viewingBoardPost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white text-black shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b bg-pink-50 px-6 py-5">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-pink-600">{getBoardLabel(viewingBoardPost.boardType)} · {formatBoardDate(viewingBoardPost.createdAt)}</p>
+                <h3 className="mt-1 break-words text-2xl font-black text-gray-900">{viewingBoardPost.isSecret ? '🔒 ' : ''}{viewingBoardPost.title}</h3>
+                <p className="mt-1 text-xs font-semibold text-gray-500">작성자: {viewingBoardPost.userEmail || '-'}</p>
+              </div>
+              <button type="button" onClick={() => setViewingBoardPost(null)} className="shrink-0 rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50">닫기</button>
+            </div>
+            <div className="max-h-[66vh] overflow-y-auto p-6">
+              <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-gray-800">{viewingBoardPost.content}</pre>
+
+              {viewingBoardPost.boardType === 'qna' && (
+                <div className="mt-7 rounded-2xl border border-pink-100 bg-pink-50 p-5">
+                  <div className="mb-3 text-sm font-black text-pink-700">관리자 답변</div>
+                  {userProfile.isAdmin ? (
+                    <>
+                      <textarea
+                        value={boardAnswerText}
+                        onChange={e => setBoardAnswerText(e.target.value)}
+                        placeholder="답변을 입력하세요"
+                        className="h-32 w-full rounded-2xl border bg-white px-4 py-3 text-sm leading-6"
+                      />
+                      <div className="mt-3 flex justify-end">
+                        <button type="button" onClick={() => saveBoardAnswer(viewingBoardPost)} className="rounded-xl bg-pink-600 px-5 py-3 text-sm font-black text-white hover:bg-pink-700">답변 저장</button>
+                      </div>
+                    </>
+                  ) : viewingBoardPost.answer ? (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-gray-800">{viewingBoardPost.answer}</pre>
+                  ) : (
+                    <div className="rounded-xl bg-white px-4 py-5 text-center text-sm font-semibold text-gray-500">아직 답변이 등록되지 않았습니다.</div>
+                  )}
+                </div>
+              )}
+
+              {canManageBoardPost(viewingBoardPost) && (
+                <div className="mt-5 flex justify-end gap-3">
+                  <button type="button" onClick={() => startEditBoardPost(viewingBoardPost)} className="rounded-xl border px-5 py-3 text-sm font-bold hover:bg-gray-50">수정</button>
+                  <button type="button" onClick={() => deleteBoardPost(viewingBoardPost)} className="rounded-xl bg-red-600 px-5 py-3 text-sm font-bold text-white hover:bg-red-700">삭제</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 언니후기 목록 보기 작은 창 */}
       {viewingReview && (
