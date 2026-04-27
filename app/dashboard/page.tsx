@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -29,6 +29,12 @@ type ExtraOrder = {
   date: string;
 };
 
+type UserProfile = {
+  roleLevel: number;
+  tokens: number;
+  isAdmin: boolean;
+};
+
 const SISTER_CATEGORIES = ['안마', '건마', '오피', '술집', '휴게텔', '기타'];
 const SISTER_CATEGORY_FILTERS = ['전체', ...SISTER_CATEGORIES];
 
@@ -37,6 +43,12 @@ export default function PinkZone() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    roleLevel: 5,
+    tokens: 0,
+    isAdmin: false,
+  });
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activeMenu, setActiveMenu] = useState('후기생성준비기');
 
@@ -96,7 +108,10 @@ export default function PinkZone() {
 
         setUserId(user.id);
         setUserEmail(user.email ?? null);
-        await loadAllData(user.id);
+        await Promise.all([
+          loadUserProfile(user.id),
+          loadAllData(user.id),
+        ]);
         setCheckingAuth(false);
       } catch (error) {
         console.error('Auth check failed:', error);
@@ -122,9 +137,42 @@ export default function PinkZone() {
     checkUser();
   }, [router]);
 
+  const loadUserProfile = async (currentUserId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role_level, tokens, is_admin')
+      .eq('id', currentUserId)
+      .single();
+
+    if (error) {
+      console.error('Profile load failed:', error);
+      setUserProfile({ roleLevel: 5, tokens: 0, isAdmin: false });
+      return;
+    }
+
+    const roleLevel = Number(data?.role_level ?? 5);
+    setUserProfile({
+      roleLevel,
+      tokens: Number(data?.tokens ?? 0),
+      isAdmin: Boolean(data?.is_admin) || roleLevel === 1 || roleLevel === 2,
+    });
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/');
+  };
+
+  const getRoleLabel = (level: number) => {
+    const labels: Record<number, string> = {
+      1: '1등급 · 최고관리자',
+      2: '2등급 · 관리자',
+      3: '3등급 · VIP 회원',
+      4: '4등급 · 유료회원',
+      5: '5등급 · 기본회원',
+    };
+
+    return labels[level] || `${level}등급`;
   };
 
   const todayText = () => new Date().toISOString().split('T')[0];
@@ -218,6 +266,115 @@ export default function PinkZone() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const normalizeBackupArray = (value: unknown) => Array.isArray(value) ? value : [];
+
+  const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const currentUserId = requireUserId();
+    const file = event.target.files?.[0];
+
+    if (!currentUserId || !file) {
+      if (event.target) event.target.value = '';
+      return;
+    }
+
+    const confirmRestore = window.confirm(
+      '백업 파일을 현재 로그인 계정 데이터에 합치기 복구합니다.\n\n같은 ID의 데이터는 백업 내용으로 업데이트되고, 없는 데이터는 새로 추가됩니다. 진행할까요?'
+    );
+
+    if (!confirmRestore) {
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+
+      if (!backup || backup.app !== 'pink-zone') {
+        alert('핑크존 백업 파일이 아닙니다.');
+        return;
+      }
+
+      const backupSisters = normalizeBackupArray(backup.sisters);
+      const backupReviews = normalizeBackupArray(backup.reviews);
+      const backupExtraOrders = normalizeBackupArray(backup.extraOrders);
+
+      const sisterRows = backupSisters
+        .filter((item: any) => item?.id && item?.name && item?.spec)
+        .map((item: any) => ({
+          id: item.id,
+          user_id: currentUserId,
+          name: String(item.name),
+          category: String(item.category || '기타'),
+          spec: String(item.spec),
+          memo: String(item.memo || ''),
+          updated_at: new Date().toISOString(),
+        }));
+
+      const reviewRows = backupReviews
+        .filter((item: any) => item?.id && item?.title && item?.content)
+        .map((item: any) => ({
+          id: item.id,
+          user_id: currentUserId,
+          sister_id: item.sisterId || item.sister_id || null,
+          sister_name: String(item.sisterName || item.sister_name || ''),
+          review_date: item.date || item.review_date || todayText(),
+          title: String(item.title),
+          content: String(item.content),
+          updated_at: new Date().toISOString(),
+        }));
+
+      const extraOrderRows = backupExtraOrders
+        .filter((item: any) => item?.id && item?.title && item?.prompt)
+        .map((item: any) => ({
+          id: item.id,
+          user_id: currentUserId,
+          title: String(item.title),
+          prompt: String(item.prompt),
+          memo: String(item.memo || ''),
+          order_date: item.date || item.order_date || todayText(),
+          updated_at: new Date().toISOString(),
+        }));
+
+      const errors: string[] = [];
+
+      if (sisterRows.length > 0) {
+        const { error } = await supabase
+          .from('sisters')
+          .upsert(sisterRows, { onConflict: 'id' });
+        if (error) errors.push(error.message);
+      }
+
+      if (reviewRows.length > 0) {
+        const { error } = await supabase
+          .from('reviews')
+          .upsert(reviewRows, { onConflict: 'id' });
+        if (error) errors.push(error.message);
+      }
+
+      if (extraOrderRows.length > 0) {
+        const { error } = await supabase
+          .from('extra_orders')
+          .upsert(extraOrderRows, { onConflict: 'id' });
+        if (error) errors.push(error.message);
+      }
+
+      if (errors.length > 0) {
+        console.error(errors);
+        alert(`백업 복구 중 오류가 발생했습니다.\n\n${errors.join('\n')}`);
+        return;
+      }
+
+      await loadAllData(currentUserId);
+      alert(`✅ 백업 복구 완료!\n\n언니정보 ${sisterRows.length}개\n후기 ${reviewRows.length}개\n추가오더 ${extraOrderRows.length}개`);
+    } catch (error) {
+      console.error(error);
+      alert('백업 파일을 읽지 못했습니다. JSON 파일 형식을 확인해주세요.');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   // ==================== 공통 필터 ====================
@@ -1001,13 +1158,39 @@ export default function PinkZone() {
             <div className="text-right hidden lg:block">
               <p className="text-[11px] text-gray-500 leading-tight">로그인 계정</p>
               <p className="text-xs font-semibold text-gray-800 leading-tight">{userEmail}</p>
+              <p className="text-[11px] font-bold text-pink-600 leading-tight mt-1">
+                {getRoleLabel(userProfile.roleLevel)} · 토큰 {userProfile.tokens.toLocaleString()}
+              </p>
             </div>
+            {userProfile.isAdmin && (
+              <button
+                type="button"
+                onClick={() => router.push('/dashboard/admin/users')}
+                className="px-4 py-2 rounded-xl bg-white border border-pink-300 text-pink-700 text-sm font-bold whitespace-nowrap hover:bg-pink-50"
+              >
+                관리자 페이지
+              </button>
+            )}
             <button
               type="button"
               onClick={downloadBackup}
               className="px-4 py-2 rounded-xl bg-pink-600 text-white text-sm font-bold whitespace-nowrap hover:bg-pink-700"
             >
               백업 다운로드
+            </button>
+            <input
+              ref={backupFileInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={restoreBackup}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => backupFileInputRef.current?.click()}
+              className="px-4 py-2 rounded-xl bg-white border border-pink-300 text-pink-700 text-sm font-bold whitespace-nowrap hover:bg-pink-50"
+            >
+              백업 복구
             </button>
             <button
               type="button"
