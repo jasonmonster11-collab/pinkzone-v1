@@ -155,7 +155,9 @@ export default function AdminTokenLogsPage() {
       return;
     }
 
-    setLogs((data || []) as TokenLog[]);
+    // Supabase join 결과 타입 추론이 빌드에서 과하게 좁게 잡히는 경우가 있어서
+    // 실제 select 구조 기준으로 TokenLog[]로 안전하게 변환합니다.
+    setLogs((data || []) as unknown as TokenLog[]);
   };
 
   const filteredLogs = useMemo(() => {
