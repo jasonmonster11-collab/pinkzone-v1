@@ -86,7 +86,7 @@ export default function PinkZone() {
   ];
 
   const isReviewMenuActive = reviewMenus.some((m) => m.id === activeMenu);
-  const REVIEW_COMBINE_TOKEN_COST = 1;
+  const REVIEW_COMBINE_TOKEN_COST = MERGE_PROMPT_TOKEN_COST;
   const canUseReviewGenerator = userProfile.isAdmin || userProfile.canGenerateReview;
 
   const [sisters, setSisters] = useState<Sister[]>([]);
@@ -1207,14 +1207,17 @@ export default function PinkZone() {
     const result = parts.join('\n');
     const nextTokens = currentTokens - MERGE_PROMPT_TOKEN_COST;
 
-    const { error: tokenUpdateError } = await supabase
+    const { data: updatedProfile, error: tokenUpdateError } = await supabase
       .from('profiles')
       .update({ tokens: nextTokens })
-      .eq('id', currentUserId);
+      .eq('id', currentUserId)
+      .select('tokens')
+      .single();
 
     if (tokenUpdateError) {
       alert(
         '토큰 차감에 실패했습니다.\n\n' +
+        'profiles 업데이트 권한/RLS 정책을 확인해주세요.\n\n' +
         'message: ' + (tokenUpdateError.message || '-') + '\n' +
         'code: ' + (tokenUpdateError.code || '-') + '\n' +
         'details: ' + (tokenUpdateError.details || '-') + '\n' +
@@ -1223,9 +1226,11 @@ export default function PinkZone() {
       return;
     }
 
+    const confirmedTokens = Number(updatedProfile?.tokens ?? nextTokens);
+
     setUserProfile((prev) => ({
       ...prev,
-      tokens: nextTokens,
+      tokens: confirmedTokens,
     }));
 
     const { error: logError } = await supabase
@@ -1234,7 +1239,7 @@ export default function PinkZone() {
         user_id: currentUserId,
         admin_id: null,
         amount: -MERGE_PROMPT_TOKEN_COST,
-        balance_after: nextTokens,
+        balance_after: confirmedTokens,
         type: 'use',
         memo: '리뷰조합기 합쳐서 저장',
       });
@@ -1246,7 +1251,7 @@ export default function PinkZone() {
       alert(
         `✅ 5번 테이블에 합쳐서 저장했습니다.\n` +
         `토큰 ${MERGE_PROMPT_TOKEN_COST}개가 차감되었습니다.\n` +
-        `현재 보유 토큰: ${nextTokens.toLocaleString()}\n\n` +
+        `현재 보유 토큰: ${confirmedTokens.toLocaleString()}\n\n` +
         '단, token_logs 기록 저장은 실패했습니다. token_logs RLS 정책을 확인해주세요.'
       );
       return;
@@ -1255,7 +1260,7 @@ export default function PinkZone() {
     alert(
       `✅ 5번 테이블에 합쳐서 저장했습니다.\n` +
       `토큰 ${MERGE_PROMPT_TOKEN_COST}개가 차감되었습니다.\n` +
-      `현재 보유 토큰: ${nextTokens.toLocaleString()}`
+      `현재 보유 토큰: ${confirmedTokens.toLocaleString()}`
     );
   };
 
